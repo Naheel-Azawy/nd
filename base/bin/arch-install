@@ -424,9 +424,12 @@ inchroot() {
             systemctl enable lightdm ;;
 
         dots-base|dots-gui)
-            info 'Installing dots...' # TODO: have an option with no gui (base only)
-            curl https://raw.githubusercontent.com/Naheel-Azawy/nd/master/install.sh > /tmp/nd.sh
-            sh /tmp/nd.sh "$USERNAME" ;;
+            info 'Installing dots...'
+            curl -L https://naheel.xyz/dots > /tmp/nd.sh
+            case "$PROFILE" in
+                dots-base) sh /tmp/nd.sh --nogui "$USERNAME" ;;
+                dots-gui)  sh /tmp/nd.sh         "$USERNAME" ;;
+            esac ;;
 
         server)
             info 'Enabling Docker...'

@@ -15,6 +15,12 @@ if [ "$1" = '--docker' ]; then
     $DOCKER_CMD run -it --rm "$IMG"
 
 else
+    if [ "$1" = '--nogui' ]; then
+        pacs='base'
+        shift
+    else
+        pacs='base base-gui'
+    fi
     user=$1
     [ -n "$user" ] || {
         echo 'usage: install.sh [USER]' >&2
@@ -25,10 +31,11 @@ else
         exit 1
     fi
     echo 'Downloading nd...'
+    # shellcheck disable=SC2086
     cd /tmp                                             &&
         git clone https://github.com/Naheel-Azawy/nd    &&
         cd nd                                           &&
         make install                                    &&
-        /opt/nd/nd --override init-system base base-gui &&
-        sudo -u $user /opt/nd/nd --override init-user base base-gui
+        /opt/nd/nd --override init-system $pacs &&
+        sudo -u "$user" /opt/nd/nd --override init-user $pacs
 fi

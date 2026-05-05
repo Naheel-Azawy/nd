@@ -307,7 +307,9 @@ init_user() {
     run create_if_not_there "$XDG_CONFIG_HOME/stpv/config.sh" ". $HERE/base/config/stpv.sh"
 
     if [ -n "$gui" ]; then
-        lnnn "$HERE/base-gui/config/bspwmrc"             "$XDG_CONFIG_HOME/bspwm/bspwmrc"
+        run create_if_not_there "$XDG_CONFIG_HOME/bspwm/bspwmrc" "#!/bin/sh
+. $HERE/base-gui/config/bspwmrc"
+        run chmod +x "$XDG_CONFIG_HOME/bspwm/bspwmrc"
         lnnn "$HERE/base-gui/config/dunstrc"             "$XDG_CONFIG_HOME/dunst/dunstrc"
         lnnn "$HERE/base-gui/config/fonts.conf"          "$XDG_CONFIG_HOME/fontconfig/fonts.conf"
         lnnn "$HERE/base-gui/config/mpd.conf"            "$XDG_CONFIG_HOME/mpd/mpd.conf"

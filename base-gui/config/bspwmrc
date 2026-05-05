@@ -16,8 +16,8 @@ bspc config pointer_follows_monitor false
 bspc config single_monocle true
 bspc config borderless_monocle true
 
-this=$(realpath "$0")
-bspc config external_rules_command "${this}-rules"
+rules="$(nd path)/base-gui/config/bspwmrc-rules"
+bspc config external_rules_command "$rules"
 
 export BSPDD_NUM_REORDER=1
 bspdd daemon &

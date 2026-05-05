@@ -466,36 +466,60 @@ touchpadtog() {
     synclient TouchpadOff=1 && echo "TouchPad deactivated."
 }
 
-systraytog() {
-    killall trayer 2>/dev/null && return 0
+systrayinit() {
+    # start tray hidden
+    stalonetray \
+        --geometry 1x1-10000-10000 \
+        --grow-gravity NW \
+        --icon-gravity NW \
+        --slot-size 48x48 \
+        --max-geometry 0x48 \
+        --background "#000000" \
+        --tint-color "#000000" \
+        --tint-level 0 \
+        --transparent \
+        --window-type dock \
+        --window-layer top \
+        --skip-taskbar \
+        --sticky &
 
+    # wait until window exists
+    wid=""
+    end=$(( $(date +%s) + 5 ))
+
+    while [ "$(date +%s)" -lt "$end" ]; do
+        wid=$(xdotool search --class stalonetray 2>/dev/null | head -n1)
+        [ -n "$wid" ] && break
+        sleep 0.05
+    done
+
+    xdotool windowunmap "$wid"
+}
+
+systraytog() {
     eval "$(xdotool getmouselocation --shell)"
+
     Y_offset=$(mon_prim_y_offset)
     Y=$((Y+15-Y_offset))
 
-    f="$FONT_SIZE_NUM"
-    if [ -n "$f" ]; then
-        h=$((f * 3))
+    wid=$(xdotool search --class stalonetray | head -n1)
+
+    state=$(xprop -id "$wid" WM_STATE 2>/dev/null)
+
+    case "$state" in
+        *Normal*) visible=1 ;;
+        *)        visible=0 ;;
+    esac
+
+    if [ "$visible" = 1 ]; then
+        # hide
+        xdotool windowunmap "$wid"
     else
-        h=48
+        # move then show
+        xdotool windowmove "$wid" "$X" "$Y"
+        xdotool windowmap "$wid"
+        xdotool windowraise "$wid"
     fi
-
-    trayer --edge top          \
-           --align left        \
-           --height "$h"       \
-           --distance "$Y"     \
-           --margin "$X"       \
-           --widthtype request \
-           --tint 0x000000     \
-           --transparent true  \
-           --expand true       \
-           --SetDockType true  \
-           --alpha 0 &
-
-    # trayer doesn't set the location correctly
-    # for multi-monitor setup
-    sleep .1
-    xdotool getactivewindow windowmove "$X" "$Y"
 }
 
 wallpaper() {
@@ -974,9 +998,8 @@ org.onboard.theme-settings key-label-font'
     autostart battery_watch                 # low battery daemon
     autostart lockscreen_daemon             # lock screen before suspend
     autostart /usr/lib/gsd-xsettings        # gnome's settings daemon
-
-    # start the window manager
-    "$WINDOW_MANAGER"
+    autostart "$WINDOW_MANAGER"             # start the window manager
+    wait
 }
 
 # ==== main ====

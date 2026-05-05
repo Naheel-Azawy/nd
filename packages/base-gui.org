@@ -8,6 +8,8 @@
 | pacman | xf86-input-synaptics                     | handles the touchpad the right way                               |
 | pacman | xorg-xprop                               | property displayer for xorg                                      |
 | pacman | xorg-xset                                | preference for xorg                                              |
+| pacman | xorg-xbacklight                          | brightness control                                               |
+| pacman | brightnessctl                            | brightness control, if xbacklight doesn't work                   |
 | pacman | xclip                                    | clipboard manageer for xorg                                      |
 | pacman | xterm                                    | a simple terminal                                                |
 | git    | https://github.com/Naheel-Azawy/theterm  | a wrapper to give the terminal super powers                      |
@@ -28,7 +30,7 @@
 | pacman | glib2                                    | just to be sure that gsettings is there                          |
 | pacman | gnome-settings-daemon                    | settings daemon for better desktop integration                   |
 | git    | https://github.com/Naheel-Azawy/lemonbar | status bar                                                       |
-| aur    | trayer                                   | a standalone system tray                                         |
+| pacman | stalonetray                              | a standalone system tray                                         |
 | aur    | i3lock-color                             | screen lock                                                      |
 | pacman | mpv                                      | patrician's choice video/gif player                              |
 | pacman | network-manager-applet                   | appears in the top right corner and manages the wi-fi connection |
