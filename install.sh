@@ -20,6 +20,10 @@ else
         echo 'usage: install.sh [USER]' >&2
         exit 1
     }
+    if [ "$(id -u)" != 0 ]; then
+        err 'Root is needed'
+        exit 1
+    fi
     echo 'Downloading nd...'
     cd /tmp                                             &&
         git clone https://github.com/Naheel-Azawy/nd    &&
