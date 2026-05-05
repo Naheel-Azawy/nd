@@ -3,6 +3,7 @@
 SELF=$(realpath "$0")
 HERE=$(dirname "$SELF")
 
+export _ND_EXPORT=1
 . "$HERE/base/config/profile.sh"
 
 # ==== Vars ====

@@ -21,7 +21,7 @@ else
         exit 1
     }
     if [ "$(id -u)" != 0 ]; then
-        err 'Root is needed'
+        echo 'Root is needed' >&2
         exit 1
     fi
     echo 'Downloading nd...'

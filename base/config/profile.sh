@@ -35,6 +35,6 @@ try_add_path() {
 }
 
 # Start graphical server if wm not already running.
-if [ "$(tty)" = "/dev/tty1" ]; then
+if [ -z "$_ND_EXPORT" ] && [ "$(tty)" = "/dev/tty1" ]; then
     pgrep -x "$WINDOW_MANAGER" || exec startx
 fi

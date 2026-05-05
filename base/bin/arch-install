@@ -288,7 +288,7 @@ profile_packages() {
 base_packages() {
     pacs='base base-devel networkmanager grub efibootmgr dosfstools'
     pacs="$pacs arch-install-scripts sudo dialog tmux nano ufw openssh"
-    pacs="$pacs rsync htop zip unzip cronie sl"
+    pacs="$pacs rsync git htop zip unzip cronie sl"
     echo "$pacs"
 }
 
@@ -424,7 +424,7 @@ inchroot() {
             systemctl enable lightdm ;;
 
         dots-base|dots-gui)
-            info 'Installing dots...'
+            info 'Installing dots...' # TODO: have an option with no gui (base only)
             curl https://raw.githubusercontent.com/Naheel-Azawy/nd/master/install.sh > /tmp/nd.sh
             sh /tmp/nd.sh "$USERNAME" ;;
 
