@@ -1,0 +1,2 @@
+#!/bin/sh
+colorpicker -do | tr -d '\n' | clipboard

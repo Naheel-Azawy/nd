@@ -1,0 +1,225 @@
+#!/bin/sh
+
+saved=''
+
+run() {
+    printf '\033[1;32m$\033[0m %s\n' "$*" >&2
+    eval "$*"
+}
+
+run_if_exists() {
+    if command -v "$1" >/dev/null; then
+        run "$@"
+    fi
+}
+
+notify() {
+    notify-send "Display" "$1"
+}
+
+current_sum() {
+    xrandr --verbose   |
+        grep -A 8 EDID |
+        md5sum         |
+        cut -d ' ' -f1
+}
+
+save() {
+    # save <sum> <name-no-space> <xrandr command>
+    saved="$saved$*
+"
+}
+
+load() {
+    sum="$1"
+    echo "$saved" | grep "^$sum" | tail -n1
+}
+
+pre() {
+    # to be overridden in the rc file
+    :
+}
+
+post() {
+    # to be overridden in the rc file
+    :
+}
+
+handle() {
+    mode="$1"
+    [ -n "$mode" ] || mode=auto
+
+    allow_notif=1
+    [ "$2" = '--no-notif' ] && allow_notif= && shift
+
+    randr=$(xrandr --verbose)
+
+    best_dim_of() {
+        # too hacky, TODO: find a better way?
+        echo "$randr"                             |
+            grep -A 9999 "^$1"                    |
+            sed -rn 's/  ([0-9]+x[0-9]+) .+/\1/p' |
+            head -n1
+    }
+
+    outs_con=$(echo "$randr" |
+                   sed -rn 's/^([A-Za-z0-9\-]+) connected .+/\1/p' |
+                   while read -r o; do
+                       printf '%s %s\n' "$(best_dim_of "$o")" "$o"
+                   done)
+    outs_dis=$(echo "$randr" |
+                   sed -rn 's/^([A-Za-z0-9\-]+) disconnected .+/\1/p')
+
+    out_first=$(echo "$outs_con" | head -n1 | cut -d ' ' -f2)
+    out_largest=$(echo "$outs_con" | sort -rn | head -n1 | cut -d ' ' -f2)
+
+    sum=$(current_sum)
+    saved_cmd=$(load "$sum")
+
+    cmd="xrandr"
+
+    OLD_IFS="$IFS"
+    IFS='
+'
+
+    cmd_off=$cmd
+    for out in $outs_con; do
+        out=$(echo "$out" | cut -d ' ' -f2)
+        if [ "$out" = "$out_first" ]; then
+            cmd_off="$cmd_off --output $out --auto --primary"
+        else
+            cmd_off="$cmd_off --output $out --off"
+        fi
+    done
+
+    if [ "$mode" = auto ] && [ -n "$saved_cmd" ]; then
+        mode=$(echo "$saved_cmd" | cut -d ' ' -f2)
+        cmd=$(echo "$saved_cmd"  | cut -d ' ' -f3-)
+
+    else
+        for out in $outs_dis; do
+            cmd="$cmd --output $out --off"
+        done
+
+        case "$mode" in
+            extend|auto)
+                # the largest is the primary; align from left to right with normal rotation
+                prev_w=0
+                for out in $outs_con; do
+                    dim=$(echo "$out" | cut -d ' ' -f1)
+                    wid=$(echo "$out" | cut -d 'x' -f1)
+                    out=$(echo "$out" | cut -d ' ' -f2)
+                    cmd="$cmd --output $out --rotate normal --mode $dim --pos ${prev_w}x0"
+                    prev_w=$((prev_w + wid))
+                    if [ "$out" = "$out_largest" ]; then
+                        cmd="$cmd --primary"
+                    fi
+                done ;;
+
+            mirror)
+                # the first is the primary; all like the primary
+                out_target=$out_first
+                dim=$(echo "$outs_con" | sed -rn "s/^(.+) $out_target/\1/p")
+                for out in $outs_con; do
+                    out=$(echo "$out" | cut -d ' ' -f2)
+                    if [ "$out" = "$out_target" ]; then
+                        cmd="$cmd --output $out --rotate normal --mode $dim --pos 0x0 --primary"
+                    else
+                        cmd="$cmd --output $out --same-as $out_target --scale-from $dim"
+                    fi
+                done ;;
+
+            *)
+                echo "ERROR: unknown mode '$mode'"
+                return 1
+        esac
+    fi
+
+    IFS="$OLD_IFS"
+
+    pre
+
+    run "$cmd" || {
+        run "$cmd_off"
+        run "$cmd"
+    }
+
+    [ -n "$allow_notif" ] && notify "$mode"
+
+    post
+}
+
+now() {
+    date +%s%3N
+}
+
+lowpass_bak() {
+    # print the last line in the range of `target` seconds
+    target="$1"
+
+    lastf=$(mktemp)
+    trap 'rm $lastf' INT TERM
+
+    while read -r line; do
+        lastt=$(now)
+        echo "$lastt" >"$lastf"
+
+        {
+            receivedt=$(now)
+            sleep "$target"
+            lastt=$(cat "$lastf")
+            if [ "$receivedt" -ge "$lastt" ]; then
+                echo "$line"
+            fi
+        } &
+    done
+
+    wait
+}
+
+lowpass() {
+    # prints the last line in the range of `debounce_time` seconds,
+    # defaults to 1 second
+    debounce_time="${1:-1}"
+    tmpfile=$(mktemp)
+    trap 'rm -f "$tmpfile"' EXIT INT TERM
+    while IFS= read -r line; do
+        echo "$line" > "$tmpfile"
+        [ -n "$timer_pid" ] && kill "$timer_pid" 2>/dev/null
+        (sleep "$debounce_time"
+         cat "$tmpfile") &
+        timer_pid=$!
+    done
+    [ -n "$timer_pid" ] && wait "$timer_pid"
+}
+
+main() {
+    cfg="${XDG_CONFIG_HOME:-$HOME/.config}/automonrc.sh"
+    [ -e "$cfg" ] && . "$cfg"
+
+    case "$1" in
+        sum)
+            current_sum ;;
+
+        auto|extend|mirror)
+            handle "$@" ;;
+
+        daemon)
+            udevadm monitor | while read -r line; do
+                if echo "$line" | grep -Eq 'UDEV.+\(drm\)'; then
+                    echo "$(date) $line"
+                fi
+            done          |
+                lowpass 2 |
+                while read -r line; do
+                    echo "$line"
+                    handle
+                done ;;
+
+        *)
+            echo 'ERROR: unknown args'
+            return 1
+    esac
+}
+
+main "$@"

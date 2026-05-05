@@ -1,0 +1,269 @@
+#!/bin/sh
+
+SYSFS=/sys/devices/platform/i8042/serio1/serio2
+
+# https://www.thinkwiki.org/wiki/UltraNav
+# https://www.thinkwiki.org/wiki/How_to_configure_the_TrackPoint
+# https://wiki.archlinux.org/title/TrackPoint
+# https://wiki.archlinux.org/title/TrackPoint#Trackpoint_moves_on_its_own
+# https://wiki.archlinux.org/title/Lenovo_ThinkPad_X230#Touchpad
+# https://wiki.archlinux.org/title/Touchpad_Synaptics
+# https://wiki.archlinux.org/title/Lenovo_ThinkPad_X1_Carbon_(Gen_10)
+
+C='\033[1m\033[34m' # blue
+E='\033[1m\033[31m' # red
+R='\033[0m'         # reset
+
+info() {
+    printf "${C}INFO:${R} %s\n" "$@"
+}
+
+err() {
+    printf "${E}ERROR:${R} %s\n" "$@" >&2
+}
+
+choose() {
+    len=$(echo "$1" | wc -l)
+    len=$((len + 2))
+    echo "$1" | fzf --height=$len
+}
+
+check_root() {
+    if [ "$(id -u)" != 0 ]; then
+        err 'Root is needed'
+        exit 1
+    fi
+}
+
+############################################
+
+bat() {
+    case "$1" in
+        limit)
+            tpacpi-bat -s ST 0 85
+            tpacpi-bat -s SP 0 95 ;;
+
+        unlimit)
+            tpacpi-bat -s ST 0 0
+            tpacpi-bat -s SP 0 0 ;;
+
+        *)
+            echo "enter limit or unlimit"
+    esac
+}
+
+############################################
+
+trackpoint() {
+    set_trackpoint_elan && return
+
+    if [ -n "$1" ]; then
+        speed="$1"
+    elif [ -n "$THINKPAD_TRACKPOINT_SPEED" ]; then
+        speed="$THINKPAD_TRACKPOINT_SPEED"
+    else
+        speed=255
+    fi
+
+    if [ -n "$2" ]; then
+        sensitivity="$2"
+    elif [ -n "$THINKPAD_TRACKPOINT_SENSITIVITY" ]; then
+        sensitivity="$THINKPAD_TRACKPOINT_SENSITIVITY"
+    else
+        sensitivity="$speed"
+    fi
+
+    info "Setting trackpoint parameters at $SYSFS..."
+    # %wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/updatedb,/usr/bin/encfs,/usr/bin/chmod a+rw /sys/class/backlight/intel_backlight/brightness,/usr/bin/mount,/usr/bin/umount,/usr/bin/chmod 666 /sys/devices/platform/i8042/serio1/serio2/speed /sys/devices/platform/i8042/serio1/serio2/sensitivity
+    if [ ! -f "$SYSFS/speed" ] || [ ! -f "$SYSFS/speed" ]; then
+        return 1
+    fi
+    sudo -n chmod 666 "$SYSFS/speed" "$SYSFS/sensitivity"
+    echo "$speed"       > "$SYSFS/speed"
+    echo "$sensitivity" > "$SYSFS/sensitivity"
+}
+
+set_trackpoint_elan() {
+    p='TPPS/2 Elan TrackPoint'
+    xinput list | grep -q "$p" || return 1
+    xinput set-prop "$p" "libinput Accel Speed" 0.5
+    xinput set-prop "$p" "libinput Accel Profile Enabled" 1 0
+    # or https://askubuntu.com/a/761504
+}
+
+set_usb_keyboard() {
+    p='Lite-On Tech Lenovo USB Travel Keyboard with Ultra Nav Mouse'
+    xinput list | grep "$p" | sed -rn 's/.+id=([0-9]+).+/\1/p' | while read -r id; do
+        xinput set-prop "$id" "libinput Scroll Method Enabled" 0, 0, 1
+        xinput set-prop "$id" "libinput Accel Speed" 1
+    done
+    # TODO: move to xorg config
+    # not sure why, but `Option "Scroll Method Enabled" "0 0 1"` is ignored
+}
+
+############################################
+
+config_xorg() {
+    p=/etc/X11/xorg.conf.d/50-synaptics.conf
+    info "Setting Xorg configurations at $p..."
+    check_root
+    echo '
+Section "InputClass"
+        Identifier "touchpad"
+        MatchProduct "SynPS/2 Synaptics TouchPad"
+        # MatchTag "lenovo_x230_all"
+        Driver "synaptics"
+        # fix touchpad resolution
+        Option "VertResolution" "100"
+        Option "HorizResolution" "65"
+        # disable synaptics driver pointer acceleration
+        Option "MinSpeed" "1.5"
+        Option "MaxSpeed" "7"
+        # tweak the X-server pointer acceleration
+        Option "AccelerationProfile" "2"
+        Option "AdaptiveDeceleration" "16"
+        Option "ConstantDeceleration" "16"
+        Option "VelocityScale" "20"
+        Option "AccelerationNumerator" "30"
+        Option "AccelerationDenominator" "10"
+        Option "AccelerationThreshold" "10"
+
+        Option "VertScrollDelta" "-500"
+        Option "HorizScrollDelta" "-500"
+        Option "VertTwoFingerScroll" "1"
+        Option "HorizTwoFingerScroll" "1"
+
+        Option "PalmDetect" "1"
+        Option "TapButton1" "1"
+        Option "TapButton2" "3"
+        Option "TapButton3" "2"
+
+        # Disable two fingers right mouse click
+        Option "TapButton2" "0"
+        Option "HorizHysteresis" "100"
+        Option "VertHysteresis" "100"
+        # fix touchpad scroll speed
+        Option "VertScrollDelta" "500"
+        Option "HorizScrollDelta" "500"
+EndSection
+' > "$p"
+    info 'Restart Xorg to apply'
+}
+
+config_systemd() {
+    info 'Setting systemd configuartions...'
+    check_root
+
+    p=/etc/systemd/system/trackpoint_parameters.path
+    info "Creating $p..."
+    echo "
+[Unit]
+Description=Watch for, and modify, Trackpoint attributes
+
+[Path]
+PathExists=$SYSFS/speed
+
+[Install]
+WantedBy=default.target
+" > "$p"
+
+    p=/etc/systemd/system/trackpoint_parameters.service
+    info "Creating $p..."
+    echo "
+[Unit]
+Description=Set TrackPoint attributes
+
+[Service]
+ExecStart=$0 trackpoint
+" > "$p"
+
+    info 'Running service...'
+    systemctl enable trackpoint_parameters.path
+    systemctl start trackpoint_parameters.path
+}
+
+init() {
+    config_xorg
+    config_systemd
+}
+
+############################################
+
+x1_touch_screen_fix() {
+    xinput --map-to-output 'ELAN901C:00 04F3:2C4E' eDP-1 2>/dev/null
+}
+
+x1_touchpad() {
+    d='SYNA8017:00 06CB:CEB2 Touchpad'
+    xinput list | grep -q "$d" || return 1
+    xinput set-prop "$d" 'Synaptics Scrolling Distance' -28 -28
+    xinput set-prop "$d" 'Synaptics Tap Action' 0, 0, 0, 0, 1, 3, 2
+}
+
+xinput_tog_dev() {
+    d="$1"
+    xinput list | grep -q "$d" || return 1
+    if xinput list-props "$d" | grep -q 'Device Enabled (.*):.*1'; then
+        xinput set-prop "$d" 'Device Enabled' 0
+    else
+        xinput set-prop "$d" 'Device Enabled' 1
+    fi
+}
+
+touchpad_tog() {
+    xinput_tog_dev 'SynPS/2 Synaptics TouchPad' ||
+        xinput_tog_dev 'SYNA8017:00 06CB:CEB2 Touchpad'
+}
+
+input() {
+    trackpoint "$@"
+    set_usb_keyboard
+    x1_touchpad
+}
+
+############################################
+
+platform_profile() {
+    cat /sys/firmware/acpi/platform_profile
+}
+
+platform_profile_set() {
+    check_root
+    ch=$(tr ' ' '\n' </sys/firmware/acpi/platform_profile_choices)
+    ch=$(choose "$ch")
+    [ -z "$ch" ] && return 1
+    echo "$ch" >/sys/firmware/acpi/platform_profile
+}
+
+############################################
+
+list() {
+    echo trackpoint
+    echo input
+    echo init
+    echo bat
+    echo x1_touch_screen_fix
+    echo platform_profile
+    echo platform_profile_set
+    echo touchpad_tog
+}
+
+main() {
+    cmd="$1"
+    [ "$cmd" = '--help' ] && list && return
+
+    [ $# = 0 ] && {
+        cmd=$(choose "$(list | tac)")
+        [ -z "$cmd" ] && return 1
+    }
+    [ $# = 0 ] || shift
+
+    if list | grep -q "^$cmd\$"; then
+        "$cmd" "$@"
+    else
+        list
+        return 1
+    fi
+}
+
+main "$@"

@@ -1,0 +1,1024 @@
+#!/bin/sh
+
+# n dots (or desktop?) gui
+
+# ==== consts ====
+
+HERE=$(realpath "$(dirname "$0")")
+NOTIF_ID=123
+XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
+
+export XDG_SESSION_TYPE=x11
+export GDK_BACKEND=x11
+
+export FONT_MONO='CaskaydiaMono NF'
+export FONT_SANS='Liberation Sans'
+export FONT="$FONT_MONO"
+export FONT_SIZE_NUM=12
+export FONT_SIZE="${FONT_MONO}:size=$FONT_SIZE_NUM" # changed later
+
+export GTK_THEME="Adwaita:dark"
+export DESKTOP_SESSION=gnome
+export QT_QPA_PLATFORMTHEME="qt5ct"
+#export QT_DEVICE_PIXEL_RATIO=1
+export QT_AUTO_SCREEN_SCALE_FACTOR=0
+#export QT_STYLE_OVERRIDE=adwaita-dark
+export CM_LAUNCHER=gmenu # for clipmenu
+export SXHKD_SHELL=dash
+export MOZ_USE_XINPUT2=1
+
+export TERMINAL='theterm'
+export THETERM_TERM='xterm'
+export FILE_MANAGER='fmz'
+export BROWSER='ndg browser'
+export READER='ndg reader'
+
+# ==== utils ====
+
+C='\033[1m\033[34m' # blue
+E='\033[1m\033[31m' # red
+R='\033[0m'         # reset
+
+info() {
+    printf "${C}INFO:${R} %s\n" "$@"
+}
+
+err() {
+    printf "${E}ERROR:${R} %s\n" "$@" >&2
+}
+
+exists() {
+    command -v "$1" >/dev/null
+}
+
+isint() {
+    [ -n "$1" ] && [ "$1" -eq "$1" ] 2>/dev/null
+}
+
+notify() {
+    if exists dunstify; then
+        dunstify -i /dev/null                          \
+                 -h string:x-dunst-stack-tag:$NOTIF_ID \
+                 "$@"
+    else
+        notify-send "$@"
+    fi
+}
+
+notify_action() {
+    if exists dunstify; then
+        # https://github.com/dunst-project/dunst/issues/672#issuecomment-554513535
+        dunstify -i /dev/null                          \
+                 -h string:x-dunst-stack-tag:$NOTIF_ID \
+                 -A 'clicked,CLICK'                    \
+                 "$@"
+    else
+        notify-send "$@"
+    fi
+}
+
+now() {
+    date +%s%3N
+}
+
+lowpass() {
+    # print the last line in the range of `target` seconds
+    target="$1"
+
+    lastf=$(mktemp)
+    trap 'rm $lastf' INT TERM
+
+    while read -r line; do
+        lastt=$(now)
+        echo "$lastt" >"$lastf"
+
+        {
+            receivedt=$(now)
+            sleep "$target"
+            lastt=$(cat "$lastf")
+            if [ "$receivedt" -ge "$lastt" ]; then
+                echo "$line"
+            fi
+        } &
+    done
+
+    wait
+}
+
+mem() {
+    kb=$(sed -rn 's/MemTotal: +([0-9]+) kB/\1/p' /proc/meminfo)
+    echo $((kb / 1000000)) # gb
+}
+
+# ==== audio ====
+
+MAX_VOL=250
+
+audio_notify() {
+    res=$(notify_action "$@")
+    if [ "$res" = clicked ]; then
+        pavucontrol
+    fi
+}
+
+audio_vol_notif() {
+    v="$1"
+    if [ -n "$2" ]; then s="$2 "; else s=; fi
+    [ "$v" ] || v=$(pamixer --get-volume)
+    if [ "$(pamixer --get-mute)" = "true" ]; then
+        audio_notify "Volume: Muted"
+    else
+        audio_notify -h int:value:"$v" "${s}Volume: $v%"
+    fi
+}
+
+audio_mic_notif() {
+    if amixer sget Capture | grep -Eq 'Capture.+\[on\]'; then
+        audio_notify "Microphone: ON"
+    else
+        audio_notify "Microphone: OFF"
+    fi
+}
+
+audio_vol() {
+    [ "$1" ] || return 1
+    lock='/tmp/__audioctl_vol_lock'
+    [ -f "$lock" ] && return
+    touch "$lock"
+    c="$1"
+    d="$2"; [ "$d" ] || d=5
+
+    # default to bluetooth if exists
+    # sink=$(pamixer --list-sinks | grep bluez | tail -n1 | cut -d' ' -f1)
+    # if [ -n "$sink" ]; then
+    #     sink_name='BT'
+    # else
+    #     sink=$(pamixer --get-default-sink | tail -n +2 | cut -d' ' -f1)
+    #     sink_name=
+    # fi
+
+    case "$c" in
+        m) pamixer -m ;;
+        t) pamixer -t ;;
+        up|down)
+            [ "$c" = down ] && d="-$d"
+            v=$(pamixer --get-volume)
+            v=$((v+d))
+            if [ $v -le $MAX_VOL ]; then
+                v=$((v/5*5))
+            else
+                v=$MAX_VOL
+            fi
+            if [ $v -lt 0 ]; then
+                v=0
+            fi
+            pamixer --allow-boost --set-volume $v
+            ;;
+    esac
+    rm -f "$lock"
+    audio_vol_notif "$v"
+}
+
+pctl() {
+    [ "$(playerctl status)" = Playing ] || return 1
+    playerctl "$@"
+}
+
+audio() {
+    cmd="$1"
+    v="$2"
+
+    case "$cmd" in
+        "up")       audio_vol up   "$v"                           ;;
+        "down")     audio_vol down "$v"                           ;;
+        "mute")     amixer -q set Master toggle;  audio_vol_notif ;;
+        "mutemic")  amixer -q set Capture toggle; audio_mic_notif ;;
+        "stop")     plctl stop           || mpc -q stop           ;;
+        "pause")    plctl play-pause     || mpc -q toggle         ;;
+        "forward")  plctl position +"$v" || mpc -q seek +"$v"     ;;
+        "back")     plctl position -"$v" || mpc -q seek -"$v"     ;;
+        "next")     plctl next           || mpc -q next           ;;
+        "prev")     plctl previous       || mpc -q prev           ;;
+        "replay")   plctl position 0     || mpc seek 0%           ;;
+        "gui")      pavucontrol                                   ;;
+        *)          return 1
+    esac
+}
+
+# ==== display ====
+
+# wrapper over xbacklight and brightnessctl
+brightness() {
+    cmd=$1
+    val=$2
+
+    _get() {
+        if out=$(xbacklight -get 2>/dev/null); then
+            printf '%.0f\n' "$out"
+            return
+        fi
+
+        cur=$(brightnessctl g)
+        max=$(brightnessctl m)
+
+        # percentage = cur * 100 / max
+        awk -v c="$cur" -v m="$max" 'BEGIN {
+            if (m == 0) { print 0; exit }
+            printf "%.0f\n", (c * 100) / m
+        }'
+    }
+
+    case "$cmd" in
+        -get)
+            _get ;;
+
+        -set|-inc|-dec)
+            xbacklight_ok=
+            xbacklight "$cmd" "$val" 2>/dev/null && xbacklight_ok=1
+
+            if [ -z "$xbacklight_ok" ]; then
+                case "$cmd" in
+                    -set) sudo -n brightnessctl s " ${val}%"  ;;
+                    -inc) sudo -n brightnessctl s "+${val}%"  ;;
+                    -dec) sudo -n brightnessctl s  "${val}%-" ;;
+                esac
+            fi
+
+            v=$(_get)
+            notify -h int:value:"$v" "Brightness: $v%" ;;
+
+        *)
+            printf 'Usage: my_xbacklight -get | -set N | -inc N | -dec N\n' >&2
+            return 1 ;;
+    esac
+}
+
+picom_invert_mkstr() {
+    # shellcheck disable=SC1003
+    if [ "$1" = '-d' ]; then
+        # double backslash
+        s='\\'
+        shift
+    else
+        s='\'
+    fi
+    cls="$1"
+    printf '  "class_g=%s"%s%s"", # AUTO INVERT' \
+           "$s" "$cls" "$s"
+}
+
+picom_invert_window() {
+    sed --version | grep -q 'GNU sed' || {
+        err 'GNU sed is expected but not found'
+        return 1
+    }
+    cfg=$(realpath "$XDG_CONFIG_HOME/picom.conf")
+    [ -f "$cfg" ] || {
+        err 'No picom config found'
+        return 2
+    }
+    cls=$(xprop -id "$(xdotool getactivewindow)" -notype WM_CLASS |
+              sed -rn 's/.+, "(.+)"/\1/p')
+    [ -n "$cls" ] || {
+        err 'No active window class found'
+        return 3
+    }
+    line=$(picom_invert_mkstr "$cls")
+    line2=$(picom_invert_mkstr -d "$cls")
+    if grep -qF "$line" "$cfg"; then
+        sed -zi "s/\n$line2//g" "$cfg"
+    else
+        sed -i 's/invert-color-include = \[/invert-color-include = \[\n'"$line2/" "$cfg"
+    fi
+}
+
+display() {
+    if [ "$1" = '-d' ]; then
+        sel='Auto'
+    else
+        l=$({
+               echo 'Auto'
+               echo 'Mirror'
+               echo 'Extend'
+               echo 'Edit screen layout'
+               exists xcalib &&
+                   echo 'Invert screen colors'
+               pgrep picom >/dev/null &&
+                   echo 'Invert window class colors'
+               exists redshift && {
+                   echo 'Temperature: 6500  Default'
+                   echo 'Temperature: 5000  Warm'
+                   echo 'Temperature: 9000  Cool'
+                   echo 'Temperature: 2000  Extra Warm'
+                   echo 'Temperature: 20000 Extra Cool'
+               }
+
+               # find "$HOME/.screenlayout" -type f -exec basename '{}' \; |
+               #     grep -v '^default' |
+               #     awk -F'.' '{print $1}'
+           })
+        sel=$(echo "$l" | gmenu --list -p 'Display options' --dims 300x350)
+    fi
+
+    case "$sel" in
+        '') ;;
+        Auto)   automon auto            ;;
+        Mirror) automon mirror          ;;
+        Extend) automon extend          ;;
+        Edit*)  arandr; wallpaper reset ;;
+        'Invert screen'*) xcalib -invert -alter ;;
+        'Invert window'*) picom_invert_window   ;;
+        Temperature*)
+            sel=$(echo "$sel" | awk '{print $2}')
+            [ "$sel" ] && redshift -P -O "${sel}K" ;;
+        *)
+            sh "$D/${sel}.sh"; wallpaper reset ;;
+    esac
+}
+
+# ==== battery ====
+
+acpi_get_percent() {
+    sed -rn 's/.+, ([0-9]+)%,.+/\1/p'
+}
+
+battery_watch() {
+    BAT_WR1=15
+    BAT_WR2=10
+    BAT_MIN=5
+
+    bat_wr1_done=
+    bat_wr2_done=
+    bat_min_done=
+
+    while :; do
+        b=$(acpi -b)
+        if echo "$b" | grep -q Discharging; then
+            p=$(echo "$b" | acpi_get_percent)
+
+            if ! isint "$p"; then
+                sleep 10
+                continue
+            elif [ "$p" -le "$BAT_MIN" ] &&
+                   [ -z "$bat_min_done" ]; then
+                for i in $(seq 60 | tac); do
+                    b=$(acpi -b)
+                    p=$(echo "$b" | acpi_get_percent)
+                    echo "$b" | grep -q Discharging || break
+                    [ "$p" -le "$BAT_MIN" ]         || break
+                    notify -u critical "Shutting down in $i..."
+                    sleep 1
+                done
+                acpi -b | grep -q Discharging || continue
+                notify -u critical "Shutting down..."
+                systemctl poweroff
+                bat_min_done=1
+            elif [ "$p" -le "$BAT_WR2" ]    &&
+                     [ -z "$bat_min_done" ] &&
+                     [ -z "$bat_wr2_done" ] ; then
+                notify -u critical "Battery too low! ($p%)"
+                bat_wr2_done=1
+            elif [ "$p" -le "$BAT_WR1" ]    &&
+                     [ -z "$bat_min_done" ] &&
+                     [ -z "$bat_wr2_done" ] &&
+                     [ -z "$bat_wr1_done" ]; then
+                notify -u critical "Battery low! ($p%)"
+                bat_wr1_done=1
+            fi
+        else
+            bat_wr1_done=
+            bat_wr2_done=
+            bat_min_done=
+        fi
+        sleep 3
+    done
+}
+
+# ==== input ====
+
+LANGS=us,ara
+LANGS_E=us,ara,ru #,fr,de,ir
+# /usr/share/X11/xkb/symbols
+
+lang_get() {
+    setxkbmap -query | sed -En 's/layout:\s*(.+)/\1/p' 2>/dev/null
+}
+
+lang_init() {
+    langs="$1"
+    [ -n "$langs" ] || langs=$LANGS
+    [ "$1" = '-e' ] && langs=$LANGS_E
+    # grep "grp:.*toggle" /usr/share/X11/xkb/rules/base.lst
+    setxkbmap -layout $langs -option grp:win_space_toggle
+    [ -f ~/.Xmodmap ] && xmodmap ~/.Xmodmap
+}
+
+lang() {
+    cmd="$1"
+    shift
+    case "$cmd" in
+        us)    lang_init us; lang_init ;;
+        init)  lang_init "$@"  ;;
+        'tog')                 ;; # TODO: ???
+        '')    lang_get        ;;
+    esac
+}
+
+input_handle() {
+    lang init
+    xset r rate 230 50
+    thinkpadutils input
+}
+
+input() {
+    input_handle
+    case "$1" in
+        daemon)
+            udevadm monitor | while read -r line; do
+                if echo "$line" | grep -Eq 'UDEV.+ add .+\(input\)'; then
+                    echo "$line"
+                fi
+            done | lowpass 2 | while read -r line; do
+                date
+                echo "$line"
+                input_handle
+            done ;;
+        reset)
+            setxkbmap -option ;;
+        init) ;;
+        *) echo 'Invalid option'
+    esac
+}
+
+# ==== mini utils ====
+
+notiftog() {
+    # https://wiki.archlinux.org/index.php/Dunst
+    dunstctl set-paused toggle
+    if [ "$(dunstctl is-paused)" = true ]; then
+        notify-send 'Notifications enabled'
+    fi
+}
+
+touchpadtog() {
+    # Toggle touchpad. Requires xf86-input-synaptics.
+    (synclient | grep 'TouchpadOff.*1' && synclient TouchpadOff=0)>/dev/null && echo "TouchPad reactivated." && exit
+    synclient TouchpadOff=1 && echo "TouchPad deactivated."
+}
+
+systraytog() {
+    killall trayer 2>/dev/null && return 0
+
+    eval "$(xdotool getmouselocation --shell)"
+    Y_offset=$(mon_prim_y_offset)
+    Y=$((Y+15-Y_offset))
+
+    f="$FONT_SIZE_NUM"
+    if [ -n "$f" ]; then
+        h=$((f * 3))
+    else
+        h=48
+    fi
+
+    trayer --edge top          \
+           --align left        \
+           --height "$h"       \
+           --distance "$Y"     \
+           --margin "$X"       \
+           --widthtype request \
+           --tint 0x000000     \
+           --transparent true  \
+           --expand true       \
+           --SetDockType true  \
+           --alpha 0 &
+
+    # trayer doesn't set the location correctly
+    # for multi-monitor setup
+    sleep .1
+    xdotool getactivewindow windowmove "$X" "$Y"
+}
+
+wallpaper() {
+    f="$XDG_CONFIG_HOME/wall"
+    [ "$1" = rm ] && {
+        rm "$f" && wallpaper reset
+        return
+    }
+    [ -f "$f" ] || {
+        nd_dir=$(nd path)
+        ln -s "$nd_dir/base-gui/config/wall.png" "$f"
+    }
+    [ "$1" = get ] && realpath "$f" && return
+    [ "$1" ] && [ "$1" != reset ] && {
+        if [ -f "$1" ]; then
+            target=$(realpath "$1")
+            ln -sf "$target" "$f"
+            gsettings set org.gnome.desktop.background \
+                      picture-uri "file://$target"
+        else
+            err "'$1' is not a file"
+        fi
+    }
+    feh --no-fehbg --bg-fill "$f"
+}
+
+# ==== lockscreen ====
+
+wait_fingerprint() {
+    exists fprintd-list || return
+    if [ -n "$FINGERPRINT_TIMEOUT" ]; then
+        timeout=$FINGERPRINT_TIMEOUT
+    else
+        timeout=$((1 * 60 * 60)) # 1 hr
+    fi
+    start=$(date +%s)
+
+    { # to avoid `timeout 5 fprintd-verify'
+        while :; do
+            if ! lockscreen_islocked; then
+                killall fprintd-verify 2>/dev/null
+                break
+            else
+                sleep 5
+            fi
+        done
+    } &
+
+    fail_count=0
+    while lockscreen_islocked; do
+        # https://github.com/i3/i3lock/issues/210#issuecomment-1047313795
+        fprint_out=$(fprintd-verify)
+        fprint_res=$(echo "$fprint_out" |
+                         sed -rn 's/Verify result: (.+) \(done\)/\1/p')
+
+        if [ -n "$fprint_res" ]; then
+            if [ $((t - start)) -gt $timeout ]; then
+                fprint_res="Timeout!"
+            fi
+            notify "Fingerprint:" "$fprint_res"
+            fail_count=0
+        else
+            echo notify "Fingerprint:" "ERROR:
+
+===============
+$fprint_out"
+            if [ "$fail_count" -ge 5 ]; then
+                sleep 5
+            else
+                fail_count=$((fail_count + 1))
+            fi
+        fi
+        if echo "$fprint_res" | grep -q verify-match; then
+            lockscreen_unlock
+        fi
+        t=$(date +%s)
+    done
+}
+
+lock_bin=i3lock
+
+lockscreen_islocked() {
+    pidof $lock_bin >/dev/null
+}
+
+lockscreen_unlock() {
+    pkill $lock_bin
+}
+
+automon_cache=~/.cache/automon/xrandr
+
+xrandr_wrapper() {
+    automon_cache=~/.cache/automon/xrandr
+    if [ -f "$automon_cache" ]; then
+        cat "$automon_cache"
+    else
+        xrandr
+    fi
+}
+
+mon_prim_y_offset() {
+    y=$(xrandr_wrapper |
+            awk '/primary/ { match($0, /\+([0-9]+)\+([0-9]+)/, a); print a[2]; exit }')
+    echo "${y:-0}"
+}
+
+lockscreen_daemon() {
+    dbus-monitor --system "type='signal',sender='org.freedesktop.login1',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'" \
+                 2>/dev/null | while read -r line; do
+        case "$line" in
+            *"boolean true"*)
+                echo "$(date '+%F %T') PRE-SLEEP"
+                lockscreen ;;
+            *"boolean false"*)
+                echo "$(date '+%F %T') POST-RESUME" ;;
+        esac
+    done
+}
+
+lockscreen() {
+    lockscreen_islocked && {
+        echo Already locked
+        return 0
+    }
+
+    lang us &
+
+    [ "$FONT" ] || FONT='sans-serif'
+    COLOR='ffffffff'
+
+    # img=/dev/null
+    # album=~/Projects/album/album
+    # [ -d "$album" ] &&
+    #     album_img=$(find "$album" -maxdepth 1 -name '*.jpg' |
+    #                     shuf | head -n1) &&
+    #     [ -n "$album_img" ] &&
+    #     img=$album_img
+
+    wait_fingerprint &
+
+    y=$(mon_prim_y_offset)
+
+    # using picom for blur and opacity
+    $lock_bin                   \
+        -e -f -c 000000         \
+        --screen 1              \
+        --clock                 \
+        --time-str  '%H:%M'     \
+        --date-str  '%Y.%m.%d'  \
+        --time-font    "$FONT"  \
+        --date-font    "$FONT"  \
+        --layout-font  "$FONT"  \
+        --verif-font   "$FONT"  \
+        --wrong-font   "$FONT"  \
+        --greeter-font "$FONT"  \
+        --time-size 200         \
+        --date-size 30          \
+        --ind-pos  "w/2:h/1.5+$y" \
+        --time-pos "w/2:h/2.0+$y" \
+        --date-pos "w/2:h/1.8+$y" \
+        --time-color   "$COLOR" \
+        --date-color   "$COLOR" \
+        --layout-color "$COLOR" \
+        --ring-color   "$COLOR" \
+        --radius 30             \
+        --pointer default       \
+        --keylayout 1           \
+        --verif-text      '...' \
+        --wrong-text      '!!!' \
+        --noinput-text    ''    \
+        --lock-text       '..'  \
+        --lockfailed-text '!'   \
+        --pass-media-keys       \
+        --pass-screen-keys      \
+        --pass-power-keys       \
+        --pass-volume-keys      \
+        --ignore-empty-password
+}
+
+# ==== mini interfaces ====
+
+browser() {
+    x=$(xrandr | sed -rn 's/.+connected primary ([0-9]+)x([0-9]+).+/\1/p')
+    if [ "$x" -ge 1920 ]; then
+        scale=1.3
+    else
+        scale=1
+    fi
+
+    AGENT_FILE="$XDG_CONFIG_HOME/ndg/browser_agent"
+    [ -f "$AGENT_FILE" ] || {
+        err 'No agent file found'
+        return 1
+    }
+    agent=$(cat "$AGENT_FILE")
+    [ -n "$agent" ] || {
+        err 'Agent file is empty'
+        return 1
+    }
+
+    if exists brave; then
+        brave \
+            --user-agent="$agent" \
+            --force-device-scale-factor="$scale" "$@"
+    elif exists chromium; then
+        chromium \
+            --user-agent="$agent" \
+            --force-device-scale-factor="$scale" "$@"
+    elif exists firefox; then
+        firefox "$@"
+    else
+        notify-send -u critical 'No installed web browser was found'
+    fi
+}
+
+floating_calc() {
+    env THETERM_TERM=gtrm theterm -s ignored-calc -a "-c -d 45x10" calc
+}
+
+calendar() {
+    # edit t --eval '(cfw:open-org-calendar)'
+    cal -y
+    # shellcheck disable=SC2086
+    while read -r a1 args; do
+        clear
+        if [ "$a1" = q ]; then
+            break
+        elif [ -z "$a1" ]; then
+            cal -y
+        elif exists hcal && [ "$a1" = h ]; then
+            if [ -n "$args" ]; then
+                hcal $args
+            else
+                hcal -y
+            fi
+        else
+            cal $a1 $args
+        fi
+    done
+}
+
+reader() {
+    if echo "$1" | grep -q '.epub$'; then
+        exec foliate "$@"
+    else
+        exec evince "$@"
+    fi
+}
+
+taskmanager() {
+    for t in btop htop top; do
+        if exists "$t"; then
+            theterm "exec $t"
+            break
+        fi
+    done
+}
+
+# ==== music ====
+
+music_stat() {
+    s=$(mpc status -f '>>> %artist% - %title%')
+    sym=$(if echo "$s" | grep -q '\[playing\]'; then
+              echo '▶'
+          else
+              echo '⏸'
+          fi)
+    s=$(echo "$s" | sed -rn 's/>>> (.+)/\1/p')
+    echo "$sym $s"
+    # TODO: playerctl metadata -F --format "{{emoji(status)}} {{ artist }} - {{ album }} - {{ title }} - {{ playerName }}" | while read line; notify-send $line; end
+}
+
+music_notif() {
+    mpc idleloop | while read -r e; do
+        [ "$e" = player ] || continue
+        notify Music "$(music_stat)"
+    done
+}
+
+music_tmux_title() {
+    [ -n "$TMUX" ] || return
+    tmux set automatic-rename off
+    tmux rename-window "$(music_stat) - Music"
+    mpc idleloop | while read -r e; do
+        [ "$e" = player ] || continue
+        tmux rename-window "$(music_stat) - Music"
+    done
+}
+
+music() {
+    case "$1" in
+        notif)
+            music_notif ;;
+        find)
+            song=$(mpc search any '' | fzf --reverse)
+            [ "$song" ] && {
+                mpc insert "$song"
+                mpc next
+            };;
+        *)
+            mpd 2>/dev/null >/dev/null # start the daemon
+            music_notif &
+            music_tmux_title &
+            ncmpcpp "$@"
+    esac
+}
+
+# ==== compositor ====
+
+compositor() {
+    case "$1" in
+        start)
+            if [ "$(mem)" -gt 2 ]; then
+                picom -b
+            fi ;;
+
+        force-start)
+            picom -b ;;
+
+        stop)
+            killall picom ;;
+
+        restart)
+            compositor stop
+            sleep .1
+            compositor start ;;
+
+        *)
+            return 1
+    esac
+}
+
+# ==== menus ====
+
+start_menu() {
+    gmenu apps
+}
+
+settings() {
+    i() {
+        n=$1
+        i=$2
+        e=$3
+        exists "$(echo "$e" | cut -d ' ' -f1)" || return
+        printf '>>j {"name": "%s", "icon": "%s", "exec": "%s"}\n' "$n" "$i" "$e";
+    }
+
+    {
+        i 'Network'   'nm-device-wired'           'nm-connection-editor'
+        i 'Hotspot'   'wihotspot'                 'wihotspot-gui'
+        i 'Bluetooth' 'blueman'                   'blueman-manager'
+        i 'Monitors'  'display'                   'ndg display'
+        i 'Audio'     'audio-headset'             'pavucontrol'
+        i 'Printer'   'printer'                   'system-config-printer'
+        i 'GTK'       'preferences-desktop-theme' 'lxappearance'
+        i 'Qt5'       'preferences-desktop-theme' 'qt5ct'
+    } | gmenu -p 'Settings' -h -i 48 -d 11ix7i
+}
+
+# ==== shortcuts ====
+
+bar() {
+    "$HERE/bar" "$@"
+}
+
+wm() {
+    "$HERE/wm-msg" "$@"
+}
+
+# ==== experimental ====
+
+foo() {
+    :
+}
+
+# ==== start ====
+
+autostart() {
+    d=$(date)
+    if exists "$1" || [ -x "$1" ]; then
+        n=$(basename "$1")
+        echo "$d: STDOUT OF" "$@" > "$logdir/$n"
+        echo "$d: STDERR OF" "$@" > "$logdir/$n-err"
+        "$@" >> "$logdir/$n" 2>> "$logdir/$n-err" &
+    else
+        echo "$1 not found!!!" > "$logdir/$1-err"
+    fi
+}
+
+xrdb() {
+    command xrdb \
+            -DFONT="$FONT" \
+            -DFONT_SIZE_NUM="$FONT_SIZE_NUM" \
+            "$@"
+}
+
+start() {
+    # set font size based on resolution
+    dim=$(xdpyinfo | grep "dimensions" | awk '{ print $2 }' | cut -d x -f1)
+    if [ "$dim" -lt 1920 ]; then
+        FONT_SIZE_NUM=12
+    else
+        FONT_SIZE_NUM=15
+    fi
+    FONT_SIZE="$FONT_MONO:size=$FONT_SIZE_NUM"
+    export FONT_SIZE_NUM FONT_SIZE
+
+    keys='org.gnome.desktop.interface font-name
+org.gnome.desktop.interface document-font-name
+org.onboard.theme-settings key-label-font'
+
+    echo "$keys" | while read -r p k; do
+        gsettings set "$p" "$k" "$FONT $((FONT_SIZE_NUM - 2))"
+    done
+
+    gsettings set org.gnome.desktop.interface monospace-font-name "$FONT_MONO $FONT_SIZE_NUM"
+
+    userresources=$HOME/.Xresources
+    sysresources=/etc/X11/xinit/.Xresources
+    sysmodmap=/etc/X11/xinit/.Xmodmap
+
+    # merge in defaults and keymaps
+
+    if [ -f $sysresources ]; then
+        xrdb -merge $sysresources
+    fi
+
+    if [ -f $sysmodmap ]; then
+        xmodmap $sysmodmap
+    fi
+
+    if [ -f "$userresources" ]; then
+        xrdb -merge "$userresources"
+    fi
+
+    # start some nice programs
+
+    if [ -d /etc/X11/xinit/xinitrc.d ] ; then
+        for f in /etc/X11/xinit/xinitrc.d/?*.sh ; do
+            # shellcheck disable=SC1090
+            [ -x "$f" ] && . "$f"
+        done
+        unset f
+    fi
+
+    # start the system keyring
+    eval "$(/usr/bin/gnome-keyring-daemon --start --components=pkcs11,secrets,ssh)"
+    export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/gcr/ssh"
+
+    # logs dir
+    logdir="/tmp/ndglogs-$USER"
+    mkdir -p "$logdir"
+    rm -r "$logdir:?"/*
+
+    # autostart programs
+    autostart xset s 900                    # blank after 15 minutes
+    autostart xset -b                       # disable bell
+    autostart sxhkd                         # keyboard daemon
+    autostart lang init                     # set the keyboard layouts
+    autostart wttr daemon                   # weather update
+    autostart dunst                         # notifications daemon
+    autostart clipmenud                     # clipboard manager daemon
+    autostart input daemon                  # mouse and keyboard setup
+    autostart xbanish                       # hides the cursor while typing
+    autostart syndaemon -i 0.5 -t -K -R     # disable touchpad while typing
+    autostart edit daemon                   # emacs daemon
+    autostart compositor start              # compositor
+    autostart wallpaper reset               # wallpaper
+    autostart automon daemon                # automatic monitor config
+    autostart automon auto --no-notif       # set monitors and starts the bar
+    autostart lang us                       # set language to 'us' and runs xmodmap
+    autostart fmz --mount-monitor           # automatically mount drives
+    autostart mount-private                 # mount encfs private directory
+    autostart nm-applet                     # network applet
+    autostart blueman-applet                # bluetooth applet
+    autostart battery_watch                 # low battery daemon
+    autostart lockscreen_daemon             # lock screen before suspend
+    autostart /usr/lib/gsd-xsettings        # gnome's settings daemon
+
+    # start the window manager
+    "$WINDOW_MANAGER"
+}
+
+# ==== main ====
+
+list() {
+    echo start
+    echo audio
+    echo brightness
+    echo browser
+    echo floating_calc
+    echo calendar
+    echo display
+    echo lang
+    echo lockscreen
+    echo lockscreen_daemon
+    echo wait_fingerprint
+    echo music
+    echo notiftog
+    echo reader
+    echo input
+    echo wallpaper
+    echo taskmanager
+    echo touchpadtog
+    echo systraytog
+    echo wm
+    echo compositor
+    echo bar
+    echo start_menu
+    echo settings
+    echo foo
+}
+
+main() {
+    [ $# = 0 ] && list && return
+    cmd="$1"
+    shift
+    if list | grep -q "^$cmd\$"; then
+        "$cmd" "$@"
+    else
+        list
+        return 1
+    fi
+}
+
+main "$@"

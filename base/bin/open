@@ -1,0 +1,116 @@
+#!/bin/sh
+
+# TODO: --ask is broken, code is ugly. Rewrite
+
+mynohup() {
+    nohup "$@" </dev/null >/dev/null 2>&1 &
+}
+
+openfile() {
+    f="$1"
+    # if directory
+    if [ -d "$f" ]; then
+        echo "$f" > '/tmp/__opendir'
+        return
+    fi
+    # if forced from picker
+    if [ "$FORCEOPENER" ]; then
+        opt=--ask
+        [ "$DEF" ] && opt=--ask-default
+        echo "$FORCEOPENER" |
+            mynohup mimeopen $opt "$f"
+    else
+        # file name
+        case "$f" in
+            *.1)
+                man "$(realpath "$f")" ;;
+            *.kicad_pro)
+                mynohup kicad "$f" ;;
+            *.ipynb)
+                mynohup code --enable-proposed-api ms-toolsai.jupyter -a . "$f";;
+            *.html)
+                mynohup ndg browser "$f";;
+            *.link)
+                url=$(cat "$f")
+                if [ -n "$url" ]; then
+                    mynohup ndg browser "$url"
+                else
+                    exec "$EDITOR" "$f"
+                fi;;
+            *.el.gz)
+                exec "$EDITOR" "$f";;
+            *.pcapng|*.cap)
+                exec termshark "$f";;
+            *.drawio)
+                mynohup drawio "$f";;
+            *.stl)
+                mynohup cura "$f";;
+            *.HC|*.HH|*.DD)
+                exec "$EDITOR" "$f";;
+            *)
+                # mime type
+                case $(file --mime-type "$(realpath """$f""")" -b) in
+                    text/*|*/json|*empty|application/javascript|\
+                        application/x-elc|application/csv)
+                        exec "$EDITOR" "$f";;
+                    *)
+                        mynohup "$OPENER" "$f";;
+                esac
+        esac
+    fi
+}
+
+pick() {
+    echo | mimeopen --ask "$1" 2>/dev/null |
+        sed -En 's/\s*(.+\)\s+.+)/\1/p' |
+        gmenu -l |
+        sed -En 's/(.+)\).+/\1/p'
+}
+
+search() {
+    if [ "$1" = '--here' ]; then
+        f=$(find "$2" -maxdepth 1 | z)
+    elif [ -d "$1" ]; then
+        f=$(find "$1" -type f | z)
+    else
+        f=$(fzfp)
+    fi
+    [ -e "$f" ] && openfile "$f"
+}
+
+[ "$OPENER" = '' ] && OPENER=xdg-open
+FORCEOPENER=''
+
+[ "$#" = 0 ] && {
+    search
+    exit
+}
+
+[ "$1" = . ] && {
+    search --here .
+    exit
+}
+
+[ "$1" = '--ask' ] || [ "$1" = '--ask-default' ] && {
+    [ "$1" = '--ask-default' ] && DEF=1
+    shift
+    FORCEOPENER=$(pick "$@")
+    [ ! "$FORCEOPENER" ] && exit 1
+}
+
+[ "$1" = '-e' ] && {
+    shift
+    $EDITOR "$@"
+    exit 0
+}
+
+# open the first, skip others.
+# this choice was made so we can exec
+f="$1"
+
+# if no such file
+[ ! -e "$f" ] && {
+    exec "$EDITOR" "$f"
+    exit
+}
+openfile "$f"

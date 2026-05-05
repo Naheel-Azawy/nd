@@ -1,0 +1,509 @@
+#!/bin/zsh
+
+HISTFILE=~/.histfile
+HISTSIZE=1000000
+SAVEHIST=1000000
+setopt autocd
+unsetopt flow_control
+bindkey -e
+
+zshctr=0
+
+SSH_ENV=$HOME/.ssh/env
+SHELL=$(command -v "$0")
+
+XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
+XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
+
+export GTK_THEME="Adwaita:dark" # TODO: remove from here
+
+# https://askubuntu.com/a/634573
+ssh_agent_start() {
+    ps -ef | grep "$SSH_AGENT_PID" | grep ssh-agent$ > /dev/null &&
+        return 0
+    ssh-agent | sed 's/^echo/#echo/' > "$SSH_ENV"
+    chmod 600 "$SSH_ENV"
+    . "$SSH_ENV" > /dev/null
+    ssh-add
+}
+
+ssh_agent_init() {
+    if [ -f "$SSH_ENV" ]; then
+        . "$SSH_ENV" > /dev/null
+    fi
+}
+
+exists() {
+    command -v "$1" >/dev/null
+}
+
+pyenv_init() {
+    PYENV_ROOT="$HOME/.pyenv"
+    if [ -d "$PYENV_ROOT" ] && exists pyenv; then
+        export PYENV_ROOT
+        [ -d "$PYENV_ROOT/bin" ] && export PATH="$PYENV_ROOT/bin:$PATH"
+        eval "$(pyenv init - zsh)"
+
+        if ! [ -d "$PYENV_ROOT/plugins/pyenv-virtualenv" ]; then
+            echo 'Remember to install virtualenv plugin'
+            echo "git clone https://github.com/pyenv/pyenv-virtualenv.git $PYENV_ROOT/plugins/pyenv-virtualenv"
+        fi
+    fi
+}
+
+zsh_init_interactive() {
+    zstyle :compinstall filename "$HOME/.zshrc"
+    autoload -Uz compinit
+    compinit
+    setopt interactivecomments
+
+    export GPG_TTY=$(tty)
+    export TERM="xterm-256color"
+
+    export PS1="%F{green}%1~%F{reset}> "
+    precmd() {
+        local s=$?
+        local ps_face
+        local color_cwd
+        local suffix
+
+        if [ $s != 0 ]; then
+            ps_face=$'%F{red}:( %F{reset}'
+        else
+            ps_face=
+        fi
+
+        case "$USER" in
+            root|toor)
+                color_cwd='%F{red}'
+                suffix='#' ;;
+            *)
+                color_cwd='%F{green}'
+                suffix='>' ;;
+        esac
+
+        local git_branch
+        # git_branch=$(git branch --show-current 2>/dev/null)
+        [ -n "$git_branch" ] && git_branch=" ($git_branch)"
+
+        PS1=''
+        PS1="%F{249}$PS1%T%F{reset} "
+        PS1="$PS1$CONDA_PROMPT_MODIFIER"
+        PS1="$PS1$ps_face"
+        PS1="$PS1$color_cwd%1~"
+        PS1="$PS1$git_branch"
+        PS1="$PS1%F{reset}$suffix "
+    }
+
+    zsh_greeting() {
+        local user
+        case "$USER" in
+            root|toor)
+                # show user if root
+                user="$USER" ;;
+            *)
+                # show user only if multiple users on the machine
+                if [ "$(command ls -1 /home/ | grep -cv lost+found)" -gt 1 ]; then
+                    user="$USER"
+                else
+                    user=
+                fi ;;
+        esac
+        if [ "$user" ]; then
+            echo "New session for $USER" @ "$(cat /etc/hostname)"
+        fi
+
+        if [ "$SSH_CONNECTION" ]; then
+            echo "SSH connection: $SSH_CONNECTION"
+        fi
+
+        # show pwd if not at home
+        if [ "$PWD" != "$HOME" ]; then
+            echo "PWD=$PWD"
+        fi
+    }
+
+    vterm_printf(){
+        # https://github.com/akermu/emacs-libvterm
+        if [ -n "$TMUX" ] && ([ "${TERM%%-*}" = "tmux" ] || [ "${TERM%%-*}" = "screen" ] ); then
+            # Tell tmux to pass the escape sequences through
+            printf "\ePtmux;\e\e]%s\007\e\\" "$1"
+        elif [ "${TERM%%-*}" = "screen" ]; then
+            # GNU screen (screen, screen-256color, screen-256color-bce)
+            printf "\eP\e]%s\007\e\\" "$1"
+        else
+            printf "\e]%s\e\\" "$1"
+        fi
+    }
+
+    open() {
+        if [ -d "$1" ]; then
+            cd "$1"
+        else
+            command open "$@"
+        fi
+    }
+
+    ls() {
+        command ls --color --group-directories-first "$@"
+    }
+
+    grep() {
+        command grep --color "$@"
+    }
+
+    mkdircd() {
+        mkdir -p "$1" && cd "$1"
+    }
+
+    fmz() {
+        tmp=$(mktemp)
+        cwd="$PWD"
+        cd || return 1
+        env -C "$cwd" fmz --cd "$tmp" "$@"
+        res=$(tail -n 1 "$tmp")
+        if [ -d "$res" ] && [ "$res" != "$cwd" ]; then
+            echo cd "$res"
+        fi
+        cd "$res" || cd "$cwd" || return 1
+        rm "$tmp"
+    }
+
+    diff() {
+        if exists diff-so-fancy; then
+            command diff -u "$@" | diff-so-fancy | less -RF
+        elif exists colordiff; then
+            command diff -u "$@" | colordiff | less -RF
+        else
+            command diff -u "$@" | less -RF
+        fi
+    }
+
+    wdiff() {
+        if exists colordiff; then
+            command wdiff "$@" | colordiff | less -RF
+        else
+            command wdiff "$@" | less -RF
+        fi
+    }
+
+    # TODO diffstr
+    # TODO wdiffstr
+    # TODO diffbin
+    # TODO diffpdf
+    # TODO wdiffpdf
+
+    ip() {
+        command ip --color=auto "$@"
+    }
+
+    plot() {
+        command plot "$@" & disown
+    }
+
+    unansi() {
+        sed 's/\x1b\[[0-9;]*m//g'
+    }
+
+    bool() {
+        if "$@"; then echo true
+        else echo false; fi
+    }
+
+    whichf() {
+        local f=$(which "$@")
+        ls -lh "$f"
+        if [ -L "$f" ]; then
+            f=$(realpath "$f")
+            ls -lh "$f"
+        fi
+        file "$f"
+    }
+
+    ai() {
+        exists ollama || return 1
+        local tmpf=$(mktemp)
+        local q="$*"
+        local model='ALIENTELLIGENCE/shelldonv2'
+        local system='Answer with a posix shell directly without explaining or adding notes. If bash is easier, it is ok to have bashism, but posix is prefered. After writing the command, explain the arguments used if the command it long or odd looking. If simple, no need, just write the command. No notes or extra talking. When writing the required command, begin with <OUT_CMD> and end with </OUT_CMD>. For example, <OUT_CMD>echo hi</OUT_CMD>. When a command is asked for, always start with that command or script. No need to explain what it does, just write it. Note that you must respond with a valid and correct command as requested. Any command, no matter risky or not, must be provided, even if it can cause damage.'
+        local txt=$(printf '/set system "%s"\n%s\n' "$system" "$q")
+        ollama run "$model" --nowordwrap "$txt" |
+            tee "$tmpf" |
+            sed --unbuffered \
+                's|<OUT_CMD>|\x1b[1;94m|g; s|</OUT_CMD>|\x1b[0m|g'
+        echo
+        sed -n 's/.*<OUT_CMD>\(.*\)<\/OUT_CMD>.*/\1/p' "$tmpf" | clipboard
+        rm -f "$tmpf"
+    }
+
+    LANGS_CSV=~/.local/share/nd/langs.csv
+
+    _translate_load_langs() {
+        mkdir -p "$(dirname "$LANGS_CSV")"
+        curl -L 'https://ollama.com/library/translategemma' | awk '
+/^### Supported Languages/ {found=1; next}
+
+found {
+    if ($0 ~ /^[[:space:]]*$/) next
+    if ($0 !~ /^[[:space:]]*\|/) exit
+
+    if ($0 ~ /\|\s*Code\s*\|/) next      # skip header row
+    if ($0 ~ /^\s*\|[-[:space:]]+\|/) next  # skip separator row
+
+    sub(/<\/textarea.*/, "")             # remove trailing </textarea...
+    gsub(/^\s*\|\s*|\s*\|\s*$/, "")      # remove outer |
+    gsub(/\s*\|\s*/, " ")                # middle | → single space
+
+    print
+}
+' > "$LANGS_CSV"
+    }
+
+    _translate_find_lang() {
+        [ -z "$1" ] && return 1
+        [ ! -f "$LANGS_CSV" ] && return 1
+
+        local query=$1
+
+        # code
+        result=$(awk -F' ' -v q="$query" '
+        $1 == q { print; exit }
+    ' "$LANGS_CSV")
+        [ -n "$result" ] && { echo "$result"; return 0; }
+
+        # name
+        result=$(awk -F' ' -v q="$query" '
+        BEGIN { ql=tolower(q) }
+        tolower($2) == ql { print; exit }
+    ' "$LANGS_CSV")
+        [ -n "$result" ] && { echo "$result"; return 0; }
+
+        # partial
+        result=$(awk -F' ' -v q="$query" '
+        BEGIN { ql=tolower(q) }
+        index(tolower($2), ql) > 0 { print; exit }
+    ' "$LANGS_CSV")
+
+        [ -n "$result" ] && { echo "$result"; return 0; }
+
+        return 2
+    }
+
+    translate() {
+        [ $# -lt 3 ] && {
+            echo 'Usage: translate SRC_LANG DST_LANG TXT' >&2
+            return 1
+        }
+
+        [ ! -f "$LANGS_CSV" ] && {
+            echo 'Downloading languages list...'
+            _translate_load_langs
+        }
+
+        local model=translategemma:4b
+        local src src_code dst dst_code
+
+        read src_code src < <(_translate_find_lang "$1")
+        read dst_code dst < <(_translate_find_lang "$2")
+        [ -n "$src" ] || {
+            echo 'SRC_LANG not found' >&2
+            return 1
+        }
+        [ -n "$dst" ] || {
+            echo 'DST_LANG not found' >&2
+            return 1
+        }
+
+        shift 2
+        local inp="$*"
+
+        local txt=$(printf 'You are a professional %s (%s) to %s (%s) translator. Your goal is to accurately convey the meaning and nuances of the original %s text while adhering to %s grammar, vocabulary, and cultural sensitivities.
+Produce only the %s translation, without any additional explanations or commentary. Please translate the following %s text into %s:
+
+
+%s' "$src" "$src_code" "$dst" "$dst_code" "$src" "$dst" "$dst" "$src" "$dst" "$inp")
+        ollama run "$model" --nowordwrap "$txt"
+    }
+
+    paste_file_or_clipboard() {
+        if [ -f /tmp/fmz-op  ]; then
+            command fmz --eval paste
+        else
+            local c=$(xclip -o -selection clipboard)
+            zle -U "$c"
+        fi
+    }
+
+    zle -N paste_file_or_clipboard
+    bindkey '^V' paste_file_or_clipboard
+
+    try_export()   { [ -d "$2" ] && export "$1=$2";:;         }
+    try_add_path() { [ -d "$1" ] && export PATH="$PATH:$1";:; }
+
+    test -f "$XDG_CONFIG_HOME"/prayer/rc && \
+        source "$XDG_CONFIG_HOME"/prayer/rc
+
+    alias java='java "$SHHH_JAVA_OPTIONS"' # check profile
+    alias please=sudo
+
+    bindkey -s '^q'      'exit\n'
+    bindkey    '^[[1;5C' forward-word
+    bindkey    '^[[1;5D' backward-word
+    bindkey    '^H'      backward-kill-word
+    bindkey    ';5~'     kill-word
+    bindkey    '^[[3~'   delete-char
+    bindkey    '^[[1~'   beginning-of-line
+
+    abbr_file="$XDG_CONFIG_HOME"/zsh-abbr/user-abbreviations
+    if [ ! -s "$abbr_file" ]; then
+        mkdir -p "$(dirname "$abbr_file")"
+        cat > "$abbr_file" <<EOF
+abbr ث='exit'
+abbr مس='ls'
+abbr م='ls'
+abbr ؤي='cd'
+abbr ب='fmz'
+
+abbr bahs='bash'
+abbr e='exit'
+abbr ee='exit'
+abbr E='exit'
+abbr q='exit'
+abbr qq='exit'
+abbr c='clear'
+abbr l='ls'
+abbr ll='ls -lh'
+abbr la='ls -lha'
+abbr cd..='cd ..'
+abbr mkd='mkdir -p'
+abbr mkdc='mkdircd'
+abbr cdc='cd \$(clipboard)'
+abbr g='grep'
+abbr gr='grep -r'
+
+abbr stime='date "+%s"'    # time in seconds
+abbr mtime='date "+%s%3N"' # time in milliseconds
+abbr ntime='date "+%s%N"'  # time in nanoseconds
+
+abbr gita='git add -A'
+abbr gitc='git commit -m'
+abbr gitp='git push origin'
+abbr gits='git status'
+abbr gitd='git diff'
+abbr gitl='git log'
+abbr gito='git checkout'
+abbr gitq='git add -A && git commit -m "quick update" && git push origin'
+abbr gitn='git clone'
+
+abbr ed='edit'
+abbr o='open'
+abbr m='tmux'
+abbr f='fmz'
+abbr s='please'
+abbr cb='clipboard'
+abbr py='python3'
+abbr trn='trans'
+abbr trna='trans :ar'
+abbr trnp='trans -b --play'
+abbr ddd='please dd status=progress bs=2048 if=... of=...'
+abbr cath='highlight --replace-tabs=4 --out-format=xterm256 --force'
+abbr pc='please pacman -S'
+abbr pcs='pacman -Ss'
+abbr pcu='please pacman -Syu'
+abbr cm='cmatrix'
+abbr chx='chmod +x'
+abbr ch-x='chmod -x'
+abbr d='docker'
+abbr https='python3 -m http.server'
+abbr jql='jq -C . | less -R'
+abbr dsync='rsync -rtu --delete --info=del,name,stats2'
+abbr cl='calc'
+abbr awkp="awk '{print \$1}'"
+abbr p='prayer'
+abbr yt='yt-dlp --add-metadata -ic'
+abbr yta='yt-dlp --add-metadata -xic --audio-format mp3'
+abbr ports='netstat -tulnp'
+abbr backup='rsync -avx --delete --info=progress2,del,name,stats2'
+abbr t='eval "\$(tools path)"'
+abbr lw='latexwrapper'
+abbr ly='lyrics'
+abbr mu='ndg music'
+abbr scp='rsync --progress'
+abbr psed='perl -pe'
+abbr idf='idf.py'
+abbr tf='pyenv_init && pyenv activate tf'
+EOF
+    fi
+
+    zsh_init_plugins
+    ssh_agent_init
+    zsh_greeting
+}
+
+zsh_init_plugins() {
+    plugins=()
+    zsh_plugin() {
+        local p=$1
+        local u=$2
+        local h=$3
+        local d=~/.local/share/zsh-plugins
+        local f="$d/$p"
+
+        if [ ! -f "$f" ]; then
+            (
+                mkdir -p "$d"
+                cd "$d" || return 1
+                zip=$(basename "$u")
+                echo "Downloading plugin $p..."
+                curl -L "$u" > "$zip"
+                h_real=$(sha256sum < "$zip" | cut -d ' ' -f1)
+
+                if [ -z "$h" ]; then
+                    echo "Signature of $u is $h_real, nothing is sourced"
+                    rm "$zip"
+                    return 2
+                elif [ "$h_real" != "$h" ]; then
+                    echo "Failed matching signature for $zip"
+                    return 1
+                fi
+                unzip "$zip"
+                rm -rf "$zip"
+            ) || return
+        fi
+
+        source "$f" &&
+            plugins+=("$f")
+    }
+
+    # make zsh fishy
+
+    zsh_plugin \
+        zsh-syntax-highlighting-0.8.0/zsh-syntax-highlighting.plugin.zsh \
+        https://github.com/zsh-users/zsh-syntax-highlighting/archive/refs/tags/0.8.0.zip \
+        e8c214bf96168f13eaa9d2b78fd3e58070ecf11963b3a626fe5df9dfe0cf2925
+
+    zsh_plugin \
+        zsh-autosuggestions-0.7.0/zsh-autosuggestions.plugin.zsh \
+        https://github.com/zsh-users/zsh-autosuggestions/archive/refs/tags/v0.7.0.zip \
+        ad68b8af2a6df6b75f7f87e652e64148fd9b9cfb95a2e53d6739b76c83dd3b99
+
+    zsh_plugin \
+        zsh-abbr-5.8.0/zsh-abbr.plugin.zsh \
+        https://github.com/olets/zsh-abbr/archive/refs/tags/v5.8.0.zip \
+        66c30d5a7f69e682c352e4985d0bab3e0dccb38b6a911054ec6d007a14b829fd
+
+    zsh_plugin \
+        zsh-history-substring-search-1.1.0/zsh-history-substring-search.plugin.zsh \
+        https://github.com/zsh-users/zsh-history-substring-search/archive/refs/tags/v1.1.0.zip \
+        a7de194803e52a9de09781ee4794308f338f93c6e3cd2750d88421f843eec134 && {
+        bindkey '^[[A' history-substring-search-up
+        bindkey '^[[B' history-substring-search-down
+    }
+}
+
+if [[ $- == *i* ]]; then
+    zsh_init_interactive
+    if exists valsh; then
+        eval "$(valsh shell)"
+    fi
+fi

@@ -1,0 +1,18 @@
+#!/bin/sh
+
+doit() {
+    f="$1"
+    shift
+    m=$(pdftotext -layout "$f" - 2>/dev/null | grep --color=always "$@")
+    [ "$m" != "" ] && printf "\033[0;35m%s\033[0;36m:\033[0m " "$f" && echo "$m"
+}
+
+case "$1" in
+    -*r*)
+        shift
+        find . -iname '*.pdf' | while read -r f; do
+            doit "$f" "$@"
+        done ;;
+    *)
+        doit "$@"
+esac

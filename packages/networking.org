@@ -1,0 +1,9 @@
+| Tag    | Name         | Purpose                                        |
+|--------+--------------+------------------------------------------------|
+| pacman | net-tools    | some handy networking tools                    |
+| pacman | traceroute   | trace the route to the host                    |
+| pacman | tcpdump      | dump network traffic                           |
+| pacman | nmap         | nmap                                           |
+| pacman | wireshark-qt | interactively dump and analyze network traffic |
+| pacman | termshark    | wireshark in the terminal                      |
+

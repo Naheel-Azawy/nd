@@ -1,0 +1,3 @@
+* nd: personal
+Scripts that might not make a lot of sense to anyone.
+TODO: move to another repo

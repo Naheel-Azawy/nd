@@ -1,0 +1,2 @@
+* nd: base-gui
+Core GUI components including scripts and configs related to X, window manager, and others.

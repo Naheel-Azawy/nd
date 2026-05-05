@@ -1,0 +1,40 @@
+#!/bin/sh
+
+COMMON='trackpoint_parameters.service
+docker.service
+bluetooth.service
+libvirtd.service
+ufw.service
+nginx.service
+openvpn-server@server.service'
+
+menu() {
+    fzf --reverse --height=10 "$@"
+}
+
+run() {
+    printf '\033[1;32m>>>\033[0m %s\n' "$*" >&2
+    "$@"
+}
+
+s=$({
+       echo "$COMMON"
+       systemctl list-unit-files --type=service | grep -v "$COMMON"
+   } | menu --header-lines=0 | cut -d ' ' -f1)
+
+[ -n "$s" ] || exit 1
+
+run systemctl status --no-pager "$s"
+echo
+
+cmd=$({
+         echo start
+         echo restart
+         echo stop
+         echo enable
+         echo disable
+         echo status
+     } | menu --prompt="command> ")
+
+[ -n "$cmd" ] &&
+    run sudo systemctl "$cmd" "$s"

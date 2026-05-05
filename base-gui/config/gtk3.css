@@ -1,0 +1,74 @@
+
+/* Removes the ugly frame */
+decoration {
+    padding-top: 0px;
+    padding-bottom: 0px;
+    padding-right: 0px;
+    padding-left: 0px;
+    border-right-color: black;
+    border-top-color: black;
+    border-bottom-color: black;
+    border-left-color: black;
+}
+
+headerbar {
+    background: black;
+}
+
+.nemo-window scrolledwindow,
+headerbar,
+window,
+dialog,
+messagedialog,
+stack,
+header,
+toolbar,
+popover,
+iconview,
+scrollbar,
+treeview {
+    background-color: black;
+}
+
+.nemo-window scrolledwindow:selected
+scrolledwindow:selected,
+headerbar:selected,
+window:selected,
+dialog:selected,
+messagedialog:selected,
+viewport:selected,
+stack:selected,
+header:selected,
+toolbar:selected,
+popover:selected,
+iconview:selected,
+scrollbar:selected,
+treeview:selected {
+    background-color: @theme_selected_bg_color;
+}
+
+evview.view.content-view {
+    background-color: black;
+    border: 1px solid #333;
+}
+
+evview:selected {
+    background-color: @theme_selected_bg_color;
+}
+
+evview.find-results:selected {
+    background-color: alpha (@theme_selected_bg_color, 0.3);
+}
+
+evview.find-results:active {
+    background-color: alpha (@theme_selected_bg_color, 0.9);
+}
+
+calendar.view {
+	background-color: black;
+}
+
+calendar:selected {
+	background-color: white;
+    color:            black;
+}

@@ -1,0 +1,67 @@
+#!/bin/sh
+
+exists() {
+    command -v "$1" >/dev/null
+}
+
+prepare() {
+    exists wget && exists firejail && return
+
+    echo '>>> Installing dependacies, sudo needed...'
+    if exists pacman; then
+        sudo pacman --noconfirm --needed -S wget firejail
+    elif exists apt; then
+        sudo apt install -y wget firejail libxcb-xtest0
+    fi
+}
+
+main() {
+    prepare
+
+    jail="$HOME/.local/share/jail-zoom"
+
+    # check latest version at https://zoom.us/download
+    version=6.6.10.5815
+    pac='zoom_x86_64.pkg.tar.xz'
+    url="https://cdn.zoom.us/prod/$version/$pac"
+
+    [ "$1" = 'rm' ]     && { rm -r "$jail"; exit; }
+    [ -d "$jail" ]      || mkdir -p "$jail"
+    [ -f "$jail/$pac" ] || (cd "$jail" && wget "$url")
+    [ -d "$jail/zoom" ] || (mkdir -p "$jail/zoom" &&
+                                cd "$jail/zoom"   &&
+                                tar xvf "$jail/$pac")
+
+    desktop="$jail/.local/share/applications/Zoom.desktop"
+    [ -d "$jail/.local/share" ] || {
+        mkdir -p "$jail/.local/share" &&
+            cp -r "$jail/zoom/usr/share/"* "$jail/.local/share/" &&
+            sed -i "s#/usr/bin/zoom#$HOME/zoom/opt/zoom/ZoomLauncher#" \
+                "$desktop"
+        {
+            echo '[MIME Cache]'
+            sed -rn 's/MimeType=(.+)/\1/p' "$desktop" |
+                tr ';' '\n' |
+                xargs printf '%s=Zoom.desktop\n'
+        } > "$jail/.local/share/applications/mimeinfo.cache"
+    }
+
+    user_desktop="$HOME/.local/share/applications/Zoom.desktop"
+    ic="$jail/.local/share/pixmaps/Zoom.png"
+    me=$(realpath "$0")
+    [ -f "$user_desktop" ] || {
+        mkdir -p "$(dirname "$user_desktop")" &&
+            cp "$desktop" "$user_desktop" &&
+            sed -ri "s#Exec=(.+)#Exec=$me#;s#Icon=(.+)#Icon=$ic#" \
+                "$user_desktop"
+    }
+
+    exec firejail          \
+         --noprofile       \
+         --private-tmp     \
+         --blacklist=/mnt  \
+         --private="$jail" \
+         "$HOME/zoom/opt/zoom/ZoomLauncher"
+}
+
+main "$@"

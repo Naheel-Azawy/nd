@@ -1,0 +1,74 @@
+#!/bin/sh
+
+mkdcd() { mkdir -p "$1" && cd "$1" && return 0; }
+
+notify() {
+    if command -v notify-send >/dev/null; then
+        notify-send "$@"
+    fi
+    echo "INFO:" "$@"
+}
+
+main() {
+    name=steam
+    jail="$HOME/.local/share/jail-$name"
+    pac='steam_latest.deb'
+    url="https://repo.steampowered.com/steam/archive/precise/$pac"
+
+    tmp="$jail/steam-tmp"
+
+    [ "$1" = 'rm' ]      && { rm -r "$jail"; exit; }
+    [ -d "$jail" ]       || mkdir -p "$jail"
+    [ -f "$jail/$pac" ]  || (cd "$jail" && notify "Downloading $name..." && wget "$url")
+    [ -d "$jail/$name" ] || (
+        notify "Installing $name..."
+        mkdcd "$jail/$name"                                     &&
+            (mkdcd "$tmp"         && ar x "$jail/$pac")         &&
+            (mkdcd "$tmp/control" && tar xvf ../control.tar.gz) &&
+            (mkdcd "$tmp/data"    && tar xvf ../data.tar.xz)    &&
+            (cd "$tmp/data" && if ! md5sum -c ../control/md5sums; then
+                 notify "Checksum check of $name not matched"
+                 exit 1
+             fi) && {
+                user_desktop="$HOME/.local/share/applications/steam.desktop"
+                user_desktop_nonet="$HOME/.local/share/applications/steam_nonet.desktop"
+                user_ic="$jail/steam.png"
+                desktop="$tmp/data/usr/share/applications/steam.desktop"
+                ic="$tmp/data/usr/share/icons/hicolor/256x256/apps/steam.png"
+                me=$(realpath "$0")
+
+                if mv "$tmp/data/usr/lib/steam" "$jail/"             &&
+                    mkdir -p "$(dirname "$user_desktop")"            &&
+                    mkdir -p "$(dirname "$user_ic")"                 &&
+                    cp "$ic" "$user_ic"                              &&
+                    sed -ri "s#Exec=.*steam #Exec=$me #g" "$desktop" &&
+                    sed -ri "s#Icon=.+#Icon=$user_ic#g" "$desktop"   &&
+                    cp "$desktop" "$user_desktop"                    &&
+                    sed -r -e 's#Exec=(.+)#Exec=\1 --nonet#;'         \
+                        -e 's#Name=Steam#Name=Steam No Net#'          \
+                        "$user_desktop" > "$user_desktop_nonet"      &&
+                    rm -r "$tmp"; then
+                    notify "Installed $name successfully!"
+                else
+                    notify "Failed installing $name"
+                fi
+            })
+
+    net=
+    for a; do
+        if [ "$a" = '--nonet' ]; then
+            net=--net=none
+        fi
+    done
+
+    # shellcheck disable=SC2086
+    exec firejail          \
+         --noprofile       \
+         --private-tmp     \
+         --blacklist=/mnt  \
+         --private="$jail" \
+         $net              \
+         "$HOME/steam/bin_steam.sh"
+}
+
+main "$@"

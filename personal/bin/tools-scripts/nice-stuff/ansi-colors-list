@@ -1,0 +1,17 @@
+#!/bin/sh
+
+xs=$(seq 0 8)
+is=$(seq 30 37)
+as=$(seq 40 47)
+
+for x in $xs; do
+    for i in $is; do
+        for a in $as; do
+            printf "\e[$x;$i;$a""m\\\e[$x;$i;$a""m\e[0;37;40m "
+        done
+        echo
+    done
+done
+printf "\e[0m\n"
+
+echo 'Reset: \e[0m'

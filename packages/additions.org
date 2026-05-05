@@ -1,0 +1,62 @@
+| Tag    | Name                                       | Purpose                                                                                        |
+|--------+--------------------------------------------+------------------------------------------------------------------------------------------------|
+| pacman | python-pip                                 | python's package manager                                                                       |
+| pacman | nodejs                                     | node.js is needed to run some programs ahead                                                   |
+| pacman | npm                                        | node.js pacage manager                                                                         |
+| pacman | yt-dlp                                     | can download any YouTube video (or playlist or channel) when given the link                    |
+| pacman | libreoffice                                | because off course someone will send a file that is not a plain text...                        |
+| pacman | jdk-openjdk                                | Java development kit                                                                           |
+| pacman | arch-install-scripts                       | contains some helpful scripts to install or maintain arch                                      |
+| pacman | gimp                                       | the gnu image manipulation program                                                             |
+| pacman | drawio-desktop                             | diagram builder                                                                                |
+| pacman | imagemagick                                | the magical image editor                                                                       |
+| pacman | virtualbox                                 | the chosen virtual machine                                                                     |
+| pacman | wine                                       | runs Windows programs. Always be careful while using non free software. Best fit with firejail |
+| pacman | wine-mono                                  | needed by wine                                                                                 |
+| pacman | wine_gecko                                 | needed by wine                                                                                 |
+| pacman | libwbclient                                | needed for wine                                                                                |
+| pacman | samba                                      | needed for wine                                                                                |
+| pacman | mpg123                                     | needed for wine                                                                                |
+| pacman | lib32-mpg123                               | needed for wine                                                                                |
+| pacman | lib32-gnutls                               | needed for wine                                                                                |
+| aur    | ttf-amiri                                  | Arabic font                                                                                    |
+| pacman | adobe-source-han-sans-cn-fonts             | Chinese font                                                                                   |
+| pacman | opendesktop-fonts                          | Japanese font                                                                                  |
+| aur    | transset-df                                | used to change the window opacity                                                              |
+| pacman | translate-shell                            | a command-line translator                                                                      |
+| pacman | python-numpy                               | some actual math in python                                                                     |
+| pacman | python-matplotlib                          | math plotting in python                                                                        |
+| pacman | texlive                                    | tex stuff                                                                                      |
+| pacman | texlive-langextra                          | tex extra languages support                                                                    |
+| pacman | biber                                      | tex biber                                                                                      |
+| pacman | screenkey                                  | display the pressed keys on the screen. Useful for screen casting                              |
+| pacman | tree                                       | list tree of directories                                                                       |
+| pacman | gnuplot                                    | Gnu plotting program                                                                           |
+| pacman | iotop                                      | top for disk io                                                                                |
+| pacman | sysstat                                    | a collection of performance monitoring tools (iostat,isag,mpstat,pidstat,sadf,sar)             |
+| pacman | perl-file-mimeinfo                         | file opener with mime type                                                                     |
+| git    | https://github.com/ym1234/colorpicker      | a simple color picker                                                                          |
+| pacman | lshw                                       | list hardware devices                                                                          |
+| pacman | tesseract                                  | OCR engine                                                                                     |
+| pacman | tesseract-data-eng                         | English data for tesseract                                                                     |
+| pacman | tesseract-data-ara                         | Arabic data for tesseract                                                                      |
+| aur    | xrandr-invert-colors                       | inver screen colors                                                                            |
+| pacman | poppler                                    | manipulates pdfs                                                                               |
+| pacman | fd                                         | faster find                                                                                    |
+| pacman | ripgrep                                    | faster grep                                                                                    |
+| pacman | foliate                                    | ebook reader                                                                                   |
+| pacman | arch-audit                                 | audit your system                                                                              |
+| git    | https://github.com/Naheel-Azawy/runner     | executes everything                                                                            |
+| pacman | lynx                                       | a terminal web browser                                                                         |
+| aur    | units                                      | units converter                                                                                |
+| pacman | octave                                     | matlab alternative                                                                             |
+| pacman | qt5ct                                      | QT5 configurations                                                                             |
+| pacman | geoip                                      | geographical IP database                                                                       |
+| git    | https://github.com/Naheel-Azawy/officejail | ms office wrapper                                                                              |
+| pacman | meson                                      | meson build system, required to build other software                                           |
+| git    | https://github.com/nbfalcon/gtk-print      | gtk printer dialog                                                                             |
+| pacman | pandoc                                     | document converter                                                                             |
+| pacman | kdenlive                                   | video editor                                                                                   |
+| aur    | ttf-material-icons-git                     | better icons font                                                                              |
+| pacman | baobab                                     | gui disk usage analysis                                                                        |
+| pacman | dua-cli                                    | disk usage analysis                                                                            |

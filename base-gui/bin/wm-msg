@@ -1,0 +1,312 @@
+#!/bin/sh
+
+# ==== i3 ====
+
+i3_resize() {
+    case "$1" in
+        left)  i3-msg resize shrink width  "$2" px or "$2" ppt ;;
+        right) i3-msg resize grow   width  "$2" px or "$2" ppt ;;
+        up)    i3-msg resize shrink height "$2" px or "$2" ppt ;;
+        down)  i3-msg resize grow   height "$2" px or "$2" ppt ;;
+    esac
+}
+
+i3_ws_new() {
+    workspaces=$(i3-msg -t get_workspaces | jq -r '.[].name')
+    new=$(seq 10 | grep -v "$workspaces" | head -n1)
+    if [ "$1" = move ]; then
+        i3-msg move container to workspace "$new"
+    else
+        i3-msg workspace "$new"
+    fi
+}
+
+# ==== bspwm ====
+
+export BSPDD_NUM_REORDER=1
+
+bspwm_resize() {
+    case "$1" in
+        left)  bspc node -z left  "$2"   0  || bspc node -z right -"$2"  0  ;;
+        right) bspc node -z right "$2"   0  || bspc node -z left  -"$2"  0  ;;
+        up)    bspc node -z top     0 -"$2" || bspc node -z bottom   0 "$2" ;;
+        down)  bspc node -z bottom  0 -"$2" || bspc node -z top      0 "$2" ;;
+    esac
+}
+
+dir_bspwm() {
+    case "$1" in
+        left)  echo west  ;;
+        right) echo east  ;;
+        up)    echo north ;;
+        down)  echo south ;;
+    esac
+}
+
+bspwm_move() {
+    d=$(dir_bspwm "$1")
+    case "$d" in
+        west)  bspc node -v -20   0 ;;
+        east)  bspc node -v  20   0 ;;
+        north) bspc node -v   0 -20 ;;
+        south) bspc node -v   0  20 ;;
+    esac || bspc node -s "$d" # || bspc node -m "$d" --follow
+}
+
+bspwm_float_cycle() {
+    # https://www.reddit.com/r/bspwm/comments/p2ee07/how_to_switch_focus_from_floating_window_to_a/
+    {
+        bspc node 'focused.floating#{next,prev}.local.!hidden.floating' -f ||
+	        bspc node 'last.local.!focused.!hidden.floating' -f ||
+	        bspc node 'any.local.!focused.!hidden.floating' -f
+    } 2>/dev/null
+}
+
+bspwm_workspace_monitor_next() {
+    current=$(bspc query -D -d focused --names)
+    count=$(bspc query -D -m focused --names | wc -l)
+    [ "$count" = 1 ] && bspdd new
+    bspc desktop "$current" -m next
+    bspdd "$current"
+}
+
+# ==== utils ====
+
+ws_scshot() {
+    # TODO: build a gui?
+    if false; then
+        wsdir="$HOME/.cache/wm-ws"
+        mkdir -p "$wsdir"
+        ws=$(bspc query -D -d .focused --names)
+        maim --hidecursor "$wsdir/$ws.png"
+    fi
+}
+
+program_menu() {
+    xdotool keyup Super_L
+    title=$(xdotool getactivewindow getwindowname)
+    items=$({
+               echo 'Close'
+               echo 'Toggle fullscreen'
+               echo 'Toggle float'
+               echo 'Toggle stick'
+               echo 'Move to...'
+               # echo 'Move right'
+               # echo 'Move left'
+               # echo 'Move up'
+               # echo 'Move down'
+               # echo 'Super down'
+               # echo 'Super up'
+
+               command -v hud >/dev/null && {
+                   hud ls
+               }
+           })
+    choice=$(echo "$items" | gmenu -l -p "$title")
+
+    case "$choice" in
+        "$title")                              ;;
+        'Close')             main window_close ;;
+        'Toggle fullscreen') main fullscreen   ;;
+        'Toggle float')      main float        ;;
+        'Toggle stick')      main stick        ;;
+        'Super down')        xdotool keydown Super_L ;;
+        'Super up')          xdotool keyup   Super_L ;;
+        'Move to...')
+            ws_menu move ;;
+        'Move '*)
+            dir=$(echo "$choice" | cut -d ' ' -f2)
+            main window_move "$dir" ;;
+        *)
+            command -v hud >/dev/null && {
+                hud run "$choice"
+            }
+    esac
+}
+
+ws_menu() {
+    move= ; [ "$1" = move ] && move=1
+
+    # TODO: i3 support?
+
+    items=$({
+               bspc query -D --names | while read -r d; do
+                   printf '%d: ' "$d"
+                   bspc query -N -d "$d"                          |
+                       xargs -l xdotool getwindowname 2>/dev/null |
+                       sed -z 's/\n/, /g'                         |
+                       head -c -2
+                   echo
+               done
+               printf "n: NEW\n"
+           })
+
+    n=$(bspc query -D -d .focused --names)
+    n=$((n - 1))
+    ws=$(echo "$items"        |
+             #column -s '\t' -t |
+             gmenu -l -p "Workspaces" -n "$n" --dims 700x500 |
+             cut -d : -f 1)
+
+    [ -n "$ws" ] && {
+        if [ -n "$move" ]; then
+            if [ "$ws" = n ]; then
+                bspdd new-move
+            else
+                bspdd node-move-go "$ws"
+            fi
+        else
+            if [ "$ws" = n ]; then
+                bspdd new
+            else
+                bspdd "$ws"
+            fi
+        fi
+    }
+}
+
+# ==== main ====
+
+main() {
+    cmd="$1"
+    arg="$2"
+
+    case "$cmd" in
+        program-menu|menu)
+            program_menu
+            return ;;
+
+        ws-menu)
+            shift
+            ws_menu "$@"
+            return ;;
+    esac
+
+    win=$(xdotool getactivewindow)
+
+    # handle emacs windows TODO: delete?
+    if false && xdotool getwindowname "$win" | grep -q emacs; then
+        case "$cmd" in
+            window_focus)
+                timeout .1 emacsclient --no-wait --eval "(windmove-$arg)" && return ;;
+            window_nice_close)
+                timeout .1 emacsclient --no-wait --eval "(delete-window)" && return ;;
+        esac
+    fi
+
+    # try sending ctrl-q to tmux for nice_close
+    [ "$cmd" = window_nice_close ] && {
+        title=$(xdotool getwindowname "$win")
+        ts=$(echo "$title" | # tmux session
+                 sed -rn 's/.+ - tmux ([0-9]+):[0-9]+/\1/p')
+        [ -n "$ts" ] && case "$title" in
+            'emacs'*)
+                tmux send-keys -t "$ts" C-g C-g C-g
+                sleep .1
+                tmux send-keys -t "$ts" C-x C-c && return ;;
+            'man '*|'less '*|'git '*|'btop '*|'htop '*|'top '*|'[tmux] '*)
+                tmux send-keys -t "$ts" q && return ;;
+            'watch '*)
+                tmux send-keys -t "$ts" C-c && return ;;
+            'alsamixer '*)
+                tmux send-keys -t "$ts" ESCAPE && return ;;
+            *)
+                tmux send-keys -t "$ts" C-q && return
+        esac
+    }
+    [ "$cmd" = window_nice_close ] && cmd=window_close
+
+    # send window manager messages using i3-msg or bspc
+    case "$WINDOW_MANAGER" in
+        i3)
+            case "$cmd" in
+                fullscreen)             i3-msg fullscreen toggle ;;
+                float)                  i3-msg floating toggle ;;
+                stick)                  i3-msg sticky toggle ;;
+                balance)                : ;;
+                equalize)               : ;;
+                split)                  i3-msg split t ;;
+                float_focus)            i3-msg focus mode_toggle ;;
+                container_focus_parent) i3-msg focus parent ;;
+                container_focus_child)  i3-msg focus child ;;
+                window_close)           i3-msg kill ;;
+                window_focus)           i3-msg focus "$arg" ;;
+                window_move)            i3-msg move "$arg" ;;
+                window_resize)          i3_resize "$arg" 10 ;;
+                window_resize_tiny)     i3_resize "$arg" 1 ;;
+                workspace)              ws_scshot; i3-msg workspace "$arg" ;;
+                workspace_move)         i3-msg move container to workspace "$arg" ;;
+                workspace_move_go)      ws_scshot; i3-msg move container to workspace "$arg"\; workspace "$arg" ;;
+                workspace_next)         ws_scshot; i3-msg workspace next ;;
+                workspace_prev)         ws_scshot; i3-msg workspace prev ;;
+                workspace_new)          ws_scshot; i3_ws_new ;;
+                workspace_new_move)     ws_scshot; i3_ws_new move ;;
+                workspace_monitor_next) i3-msg move workspace to output right ;;
+                restart)                i3-msg restart ;;
+                end)                    i3-msg exit ;;
+            esac ;;
+
+        bspwm)
+            case "$cmd" in
+                fullscreen)             bspc node -t ~fullscreen ;;
+                float)                  bspc node -t ~floating ;;
+                stick)                  bspc node -g sticky ;;
+                balance)                bspc node -B ;;
+                equalize)               bspc node -E ;;
+                split)                  bspc node -f @parent && bspc node -R 90 && bspc node -f @first ;;
+                float_focus)            bspwm_float_cycle ;;
+                container_focus_parent) bspc node -f @parent ;;
+                container_focus_child)  bspc node -f @first ;;
+                window_close)           bspc node -c ;;
+                window_focus)           d=$(dir_bspwm "$arg"); bspc node -f "$d" || bspc monitor -f "$d" ;;
+                window_move)            bspwm_move "$arg" ;;
+                window_resize)          bspwm_resize "$arg" 30 ;;
+                window_resize_tiny)     bspwm_resize "$arg" 5 ;;
+                workspace)              ws_scshot; bspdd "$arg" ;;
+                workspace_move)         bspdd node-move "$arg" ;;
+                workspace_move_go)      ws_scshot; bspdd node-move-go "$arg" ;;
+                workspace_next)         ws_scshot; bspdd next ;;
+                workspace_prev)         ws_scshot; bspdd prev ;;
+                workspace_new)          ws_scshot; bspdd new ;;
+                workspace_new_move)     ws_scshot; bspdd new-move ;;
+                workspace_monitor_next) bspwm_workspace_monitor_next ;;
+                restart)                bspc wm -r ;;
+                end)                    bspc quit ;;
+            esac ;;
+
+        awesome)
+            ac()  { awesome-client "$@"; }
+            aca() { ac 'require("awful").'"$*"; }
+            case "$cmd" in
+                fullscreen)             : ;;
+                float)                  : ;;
+                stick)                  : ;;
+                balance)                : ;;
+                equalize)               : ;;
+                split)                  : ;;
+                float_focus)            : ;;
+                container_focus_parent) : ;;
+                container_focus_child)  : ;;
+                window_close)           : ;;
+                window_focus)           : ;;
+                window_move)            : ;;
+                window_resize)          : ;;
+                window_resize_tiny)     : ;;
+                workspace)              : ;;
+                workspace_move)         : ;;
+                workspace_move_go)      : ;;
+                workspace_next)         aca 'tag.viewnext()' ;;
+                workspace_prev)         aca 'tag.viewprev()' ;;
+                workspace_new)          : ;;
+                workspace_new_move)     : ;;
+                workspace_monitor_next) : ;;
+                restart)                : ;;
+                end)                    : ;;
+            esac ;;
+
+        *)
+            echo "Unknown window manager '$WINDOW_MANAGER'" ;;
+    esac
+}
+
+main "$@"

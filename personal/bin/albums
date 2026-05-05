@@ -1,0 +1,9 @@
+#!/bin/sh
+
+# TODO: move to personal
+
+cd /home/naheel/.data/Personal/Backups/Albums &&
+    fd -t f -x echo '{/}' '{}' |
+        sort -r | cut -d ' ' -f2 |
+        #mpv --playlist=-
+        sxiv -t -

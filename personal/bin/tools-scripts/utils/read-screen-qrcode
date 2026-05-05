@@ -1,0 +1,19 @@
+#!/bin/sh
+
+notify() {
+    notify-send "$@" >/dev/null 2>/dev/null &
+}
+
+ndg compositor stop
+sleep .1
+
+I="$HOME/.cache/qrcode-tmp-img.png"
+maim --hidecursor -s "$I" && {
+    notify 'Reading screen...'
+    txt=$(zbarimg "$I")
+    notify "$txt"
+    echo "$txt" | clipboard
+}
+
+rm -f "$I" "$I.txt"
+ndg compositor start

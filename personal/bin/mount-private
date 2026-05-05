@@ -1,0 +1,14 @@
+#!/bin/sh
+
+# TODO: move to personal
+
+CTL="$HOME/.data/ctl.sh"
+
+case "$1" in
+    -u) "$CTL" end ;;
+    -m) "$CTL" begin ;;
+    '')
+        gtrm -f -d 40x5 \
+             -e sh -c "echo;echo;exec '$0' -m"
+        ;;
+esac

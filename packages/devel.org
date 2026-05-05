@@ -1,0 +1,22 @@
+| Tag    | Name                       | Purpose                                |
+|--------+----------------------------+----------------------------------------|
+| pacman | man-pages                  | manuals                                |
+| pacman | docker                     | to run docker containers               |
+| pacman | cloc                       | Calculates lines of code               |
+| pacman | cmake                      | CMake build system                     |
+| pacman | clang                      | another cool c compiler                |
+| pacman | arm-none-eabi-gcc          | arm toys                               |
+| pacman | arm-none-eabi-newlib       | more arm toys                          |
+| pacman | emscripten                 | llvm to javascript                     |
+| aur    | umlet                      | UML builder                            |
+| pacman | yarn                       | dependency installer                   |
+| pacman | gdb                        | the gnu debugger                       |
+| pacman | strace                     | trace system calls                     |
+| pacman | ltrace                     | trace library function calls           |
+| pacman | fx                         | a cool way to view JSON                |
+| pacman | yq                         | YAML and XML interface to jq           |
+| pacman | aha                        | ANSI to HTML                           |
+| pacman | gitui                      | a nice and quick git tui               |
+| pacman | typescript-language-server | LSP for typescript                     |
+| pacman | python-lsp-server          | LSP for python                         |
+| pacman | android-tools              | ADB and others                         |

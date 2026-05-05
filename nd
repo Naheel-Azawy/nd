@@ -1,0 +1,359 @@
+#!/bin/sh
+
+SELF=$(realpath "$0")
+HERE=$(dirname "$SELF")
+
+. "$HERE/base/config/profile.sh"
+
+# ==== Vars ====
+
+override=
+
+# ==== Utils ====
+
+G='\033[1m\033[32m' # cmd color
+C='\033[1m\033[34m' # info color
+W='\033[1m\033[33m' # warn color
+E='\033[1m\033[31m' # error color
+R='\033[0m'         # reset color
+
+run() {
+    printf "${G}>>>${R} %s\n" "$*" >&2
+    "$@"
+}
+
+exists() {
+    command -v "$1" >/dev/null
+}
+
+info() {
+    printf "${C}INFO:${R} %s\n" "$@"
+}
+
+err() {
+    printf "${E}ERROR:${R} %s\n" "$@" >&2
+}
+
+warn() {
+    printf "${W}WARNING:${R} %s\n" "$@" >&2
+}
+
+uncomment() {
+    line="$1"
+    file="$2"
+    if [ -w "$file" ]; then
+        sed -i "s/# *$line/$line/" "$file"
+    else
+        sed -i "s/# *$line/$line/" "$file"
+    fi
+}
+
+comment() {
+    line="$1"
+    file="$2"
+    if [ -w "$file" ]; then
+        sed -i "s/$line/# $line/" "$file"
+    else
+        sed -i "s/$line/# $line/" "$file"
+    fi
+}
+
+create_if_not_there() {
+    if [ -z "$override" ] && [ -e "$1" ]; then
+        warn "$1 exists already, skipping..."
+    else
+        __todir=$(dirname "$1")
+        mkdir -p "$__todir"
+        rm -rf "$1" 2>/dev/null
+        echo "$2" > "$1"
+    fi
+}
+
+check_root() {
+    if [ "$(id -u)" != 0 ]; then
+        err 'Root is needed'
+        exit 1
+    fi
+}
+
+# ==== Init system (all run under root) ====
+
+yay_wrapper() {
+    check_root
+
+    YAY_BIN="/usr/bin/yay"
+    SAFE_USER="aurbuild"
+    SAFE_HOME="/var/lib/aurbuild"
+    SUDOERS_FILE="/etc/sudoers.d/aurbuild"
+
+    # Create user if missing (root only)
+    if ! id "$SAFE_USER" >/dev/null 2>&1; then
+        if [ "$(id -u)" -ne 0 ]; then
+            err "User $SAFE_USER does not exist and cannot be created without root"
+            return 1
+        fi
+
+        useradd -r -m -d "$SAFE_HOME" -s /usr/bin/nologin "$SAFE_USER" || return 1
+        chown -R "$SAFE_USER:$SAFE_USER" "$SAFE_HOME" || return 1
+    fi
+
+    # Root-only setup
+    if [ "$(id -u)" -eq 0 ]; then
+        # sudoers (restricted to pacman)
+        if [ ! -f "$SUDOERS_FILE" ]; then
+            {
+                echo "$SAFE_USER ALL=(ALL) NOPASSWD: /usr/bin/pacman"
+                echo "Defaults:$SAFE_USER !authenticate"
+            } > "$SUDOERS_FILE" || return 1
+            chmod 0440 "$SUDOERS_FILE" || return 1
+        fi
+
+        install -d -m 0755 -o "$SAFE_USER" -g "$SAFE_USER" "$SAFE_HOME/.cache" || return 1
+        install -d -m 0755 -o "$SAFE_USER" -g "$SAFE_USER" "$SAFE_HOME/.config" || return 1
+    fi
+
+    # Install yay if missing (must be root for pacman phase)
+    if [ ! -x "$YAY_BIN" ]; then
+        if [ "$(id -u)" -ne 0 ]; then
+            err "yay missing and cannot be installed without root"
+            return 1
+        fi
+        pacman --noconfirm --needed -S base-devel git go
+
+        sudo -u "$SAFE_USER" \
+            HOME="$SAFE_HOME" \
+            XDG_CACHE_HOME="$SAFE_HOME/.cache" \
+            XDG_CONFIG_HOME="$SAFE_HOME/.config" \
+            sh -c '
+                set -e
+                cd "$HOME"
+                if [ ! -d yay ]; then
+                    git clone https://aur.archlinux.org/yay.git
+                fi
+                cd yay
+                makepkg -si --noconfirm
+            ' || return 1
+    fi
+
+    # Non-root: run directly
+    if [ "$(id -u)" -ne 0 ]; then
+        "$YAY_BIN" "$@"
+        return $?
+    fi
+
+    # Root: drop privileges
+    sudo -u "$SAFE_USER" \
+        HOME="$SAFE_HOME" \
+        XDG_CACHE_HOME="$SAFE_HOME/.cache" \
+        XDG_CONFIG_HOME="$SAFE_HOME/.config" \
+        sh -c '"$0" "$@"' "$YAY_BIN" "$@"
+}
+
+pkg_load_tables() {
+    # gets the list of packages from tables
+    (cd "$HERE/packages" || {
+         err 'No packages tables found'
+         return 1
+     }
+     if [ $# != 0 ]; then
+         files="$*"
+     else
+         files="base base-gui"
+     fi
+     for f in $files; do
+         [ -f "$f.org" ] || {
+             err "Unknown package group '$f'"
+             return 1
+         }
+         tail -n +3 "$f.org" | sed 's/|/ /g;s/  */ /g'
+     done)
+}
+
+install_packages() {
+    check_root
+
+    all=$(pkg_load_tables "$@")
+    for where in pacman aur git; do
+        some=$(echo "$all" | grep "^ $where " | awk '{print $2}')
+        # shellcheck disable=SC2086
+        case "$where" in
+            pacman)
+                run pacman --noconfirm --needed -S $some ;;
+
+            aur)
+                run yay_wrapper --noconfirm --needed -S $some ;;
+
+            git)
+                # TODO: update pacgit to install multiple urls
+                for url in $some; do
+                    run pacgit -S "$url"
+                done ;;
+        esac
+    done
+}
+
+init_system() {
+    gui=
+    for arg in "$@"; do
+        if [ "$arg" = base-gui ]; then
+            gui=1
+            break
+        fi
+    done
+
+    check_root
+
+    pacman --noconfirm --needed -Sy sudo git || return
+
+    info 'Enabling wheel group in sudoers'
+    run uncomment '%wheel ALL=(ALL:ALL) ALL' /etc/sudoers
+
+    info 'Enabling multilib'
+    grep -q '^\[multilib\]' /etc/pacman.conf ||
+        printf '[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' \
+               >> /etc/pacman.conf
+    pacman -Sy || return
+
+    info 'Installing yay'
+    yay_wrapper --version || return
+
+    info 'Installing pacgit'
+    if ! exists pacgit; then
+        dir=$(mktemp -d)
+        url=https://github.com/Naheel-Azawy/pacgit
+        (git clone --depth 1 "$url" "$dir" &&
+             cd "$dir" &&
+             make && make install &&
+             cd /tmp && rm -rf "$dir") || return
+    fi
+
+    info 'Installing packages'
+    install_packages "$@" || return
+
+    info "Setting up sensors"
+    run sensors-detect --auto
+    run modprobe eeprom
+
+    info "Updating time..."
+    run "$HERE/base/bin/time-update" -y
+
+    info 'Keyboard remapping' # TODO: move to personal?
+    run cp "$HERE/base/config/keyd.conf" '/etc/keyd/default.conf'
+    systemctl enable --now keyd
+
+    info 'Allowing brightness control'
+    echo "ALL ALL=(root) NOPASSWD: /usr/bin/brightnessctl" |
+        tee /etc/sudoers.d/brightnessctl >/dev/null &&
+        chmod 0440 /etc/sudoers.d/brightnessctl &&
+        visudo -cf /etc/sudoers.d/brightnessctl
+
+    if [ -n "$gui" ]; then
+        # https://wiki.archlinux.org/index.php/GNOME/Keyring#Without_a_display_manager
+        info 'Setting up keyring'
+        f=/etc/pam.d/login
+        grep -Eq 'auth\s+optional\s+pam_gnome_keyring.so' $f ||
+            sed -i "s/account/auth       optional     pam_gnome_keyring.so\naccount/" $f
+        grep -Eq 'session\s+optional\s+pam_gnome_keyring.so auto_start' $f ||
+            echo 'session    optional     pam_gnome_keyring.so auto_start' >> $f
+        f=/etc/pam.d/passwd
+        grep -Eq 'password\s+optional\s+pam_gnome_keyring.so' $f ||
+            echo 'password	optional	pam_gnome_keyring.so' >> $f
+    fi
+}
+
+# ==== Init user (run as user) ====
+
+lnnn() {
+    __todir=$(dirname "$2")
+    mkdir -p "$__todir"
+    rm -rf "$2" 2>/dev/null
+    run ln -s "$1" "$2"
+}
+
+init_user() {
+    gui=
+    for arg in "$@"; do
+        if [ "$arg" = base-gui ]; then
+            gui=1
+            break
+        fi
+    done
+
+    info 'Preparing shell'
+    run create_if_not_there "$HOME/.bashrc" \
+        ". $HERE/base/config/shell-bash.sh"
+    run create_if_not_there "$HOME/.zshrc" \
+        ". $HERE/base/config/shell-zsh.sh"
+    run zsh -c ". $HOME/.zshrc; zsh_init_plugins" # TODO: avoid per-user download
+
+    info "Preparing editor..."
+    if [ -d ~/.config/emacs ] && [ -z "$override" ]; then
+        warn 'Emacs config exists, skipping...'
+    else
+        yes y | run edit prepare-all
+        run edit daemon
+    fi
+
+    info 'Linking'
+
+    run create_if_not_there "$HOME/.profile" "export PATH="'"$PATH:'"$HERE:$HERE/base/bin:$HERE/base-gui/bin"'"'"
+. $HERE/base/config/profile.sh"
+    lnnn "$HOME/.profile" "$HOME/.bash_profile"
+    lnnn "$HOME/.profile" "$HOME/.xprofile"
+
+    run create_if_not_there "$HOME/.tmux.conf"                "source-file $HERE/base/config/tmux.conf"
+    run create_if_not_there "$XDG_CONFIG_HOME/fmzrc.sh"       ". $HERE/base/config/fmz.sh"
+    run create_if_not_there "$XDG_CONFIG_HOME/stpv/config.sh" ". $HERE/base/config/stpv.sh"
+
+    if [ -n "$gui" ]; then
+        lnnn "$HERE/base-gui/config/bspwmrc"             "$XDG_CONFIG_HOME/bspwm/bspwmrc"
+        lnnn "$HERE/base-gui/config/dunstrc"             "$XDG_CONFIG_HOME/dunst/dunstrc"
+        lnnn "$HERE/base-gui/config/fonts.conf"          "$XDG_CONFIG_HOME/fontconfig/fonts.conf"
+        lnnn "$HERE/base-gui/config/mpd.conf"            "$XDG_CONFIG_HOME/mpd/mpd.conf"
+        lnnn "$HERE/base-gui/config/ncmpcpp.conf"        "$XDG_CONFIG_HOME/ncmpcpp/config"
+        lnnn "$HERE/base-gui/config/ncmpcpp-bindings"    "$XDG_CONFIG_HOME/ncmpcpp/bindings"
+        lnnn "$HERE/base-gui/config/sxiv-key-handler.sh" "$XDG_CONFIG_HOME/sxiv/exec/key-handler"
+        lnnn "$HERE/base-gui/config/sxiv-image-info.sh"  "$XDG_CONFIG_HOME/sxiv/exec/image-info"
+        lnnn "$HERE/base-gui/config/picom.conf"          "$XDG_CONFIG_HOME/picom.conf"
+        lnnn "$HERE/base-gui/config/user-dirs.dirs"      "$XDG_CONFIG_HOME/user-dirs.dirs"
+        lnnn "$HERE/base-gui/config/xinitrc.sh"          "$HOME/.xinitrc"
+        lnnn "$HERE/base-gui/config/Xresources"          "$HOME/.Xresources"
+        lnnn "$HERE/base-gui/config/gtk-icons.theme"     "$HOME/.icons/default/index.theme"
+        lnnn "$HERE/base-gui/config/gtk3-settings.ini"   "$XDG_CONFIG_HOME/gtk-3.0/settings.ini"
+        lnnn "$HERE/base-gui/config/gtk3.css"            "$XDG_CONFIG_HOME/gtk-3.0/gtk.css"
+        lnnn "$HERE/base-gui/config/gtk2rc"              "$HOME/.gtkrc-2.0"
+        lnnn "$HERE/base-gui/config/sxhkdrc"             "$XDG_CONFIG_HOME/sxhkd/sxhkdrc"
+        lnnn "$HERE/base-gui/config/automonrc.sh"        "$XDG_CONFIG_HOME/automonrc.sh"
+        # lnnn "$HERE/base-gui/config/Xmodmap"             "$HOME/.Xmodmap"
+
+        info 'Setting keyboard theme'
+        run sh "$HERE/base-gui/config/onboard-gsettings.sh" # TODO: any cleaner way?
+    fi
+}
+
+# ==== Main ====
+
+main() {
+    exists pacman || {
+        err 'Unsupported distrobution.'
+        return 1
+    }
+
+    if [ "$1" = '--override' ]; then
+        override=1
+        shift
+    fi
+
+    cmd="$1"
+    [ $# != 0 ] && shift
+    case "$cmd" in
+        path)        echo "$HERE"          ;;
+        yay)         yay_wrapper      "$@" ;;
+        install)     install_packages "$@" ;;
+        init-system) init_system      "$@" ;;
+        init-user)   init_user        "$@" ;;
+        *)           return 1              ;;
+    esac
+}
+
+main "$@"

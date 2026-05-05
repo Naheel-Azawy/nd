@@ -1,0 +1,3 @@
+#!/bin/sh
+
+curl -L 'https://standards-oui.ieee.org/oui/oui.txt' > /usr/share/hwdata/oui.txt

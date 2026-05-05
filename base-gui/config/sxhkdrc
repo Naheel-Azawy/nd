@@ -1,0 +1,368 @@
+# Close focused program
+super+q
+	wm-msg window_nice_close
+
+# Close focused window keeping tmux sessions
+super+shift+q
+	wm-msg window_close
+
+# Enter fullscreen mode for the focused container
+super+f
+	wm-msg fullscreen
+
+# Toggle tiling / floating
+super+t
+	wm-msg float
+
+# Toggle sticky window
+super+shift+t
+	wm-msg stick
+
+# Toggle split
+super+shift+slash
+	wm-msg split
+
+# Equalize windows
+super+shift+comma
+	wm-msg equalize
+
+# Balance windows
+super+comma
+	wm-msg balance
+
+# Change focus between tiling / floating windows
+super+slash
+	wm-msg float_focus
+
+# Focus the parent container
+super+Prior
+	wm-msg container_focus_parent
+
+# Focus the child container
+super+Next
+	wm-msg container_focus_child
+
+# Change focus
+super+{Left,Right,Up,Down}
+	wm-msg window_focus {left,right,up,down}
+
+# Move focused window
+super+shift+{Left,Right,Up,Down}
+	wm-msg window_move {left,right,up,down}
+
+# Resize window
+super+ctrl+{Left,Right,Up,Down}
+	wm-msg window_resize {left,right,up,down}
+
+# Resize window (a little bit)
+super+shift+ctrl+{Left,Right,Up,Down}
+	wm-msg window_resize_tiny {left,right,up,down}
+
+# Switch to workspace
+super+{1-9,0}
+	wm-msg workspace {1-9,10}
+
+# Move focused container to workspace
+super+ctrl+{1-9,0}
+	wm-msg workspace_move {1-9,10}
+
+# Move focused container to workspace and go there
+super+shift+{1-9,0}
+	wm-msg workspace_move_go {1-9,10}
+
+# Move to next workspace
+super+Tab
+	wm-msg workspace_next
+
+# Move to previous workspace
+super+shift+Tab
+	wm-msg workspace_prev
+
+# Move to a new workspace
+super+equal
+    wm-msg workspace_new
+
+# Move current window to a new workspace
+super+plus
+    wm-msg workspace_new_move
+
+# Move workspace to next monitor
+super+ctrl+p
+	wm-msg workspace_monitor_next
+
+# Jump to a workspace
+super+minus
+	wm-msg ws-menu
+
+# Move window to a workspace
+super+shift+minus
+	wm-msg ws-menu move
+
+# Restart window manager
+super+shift+r
+	wm-msg restart; pkill -USR1 -x sxhkd
+
+# Start a terminal
+super+Return
+	theterm
+
+# Start a terminal (without tmux)
+super+ctrl+Return
+	$TERMINAL bash
+
+# Start file manager
+super+apostrophe
+	theterm zsh -c "$FILE_MANAGER"
+
+# Empty window
+super+e
+	empty
+
+# Start the program launcher
+super+d
+	ndg start_menu
+
+# Toggle on-screen keyboard
+super+k
+	pkill onboard || onboard
+
+# Open the internet browser
+super+b
+	ndg browser
+
+# Open calculator
+super+backslash
+	ndg floating_calc
+
+# Lock screen
+super+l
+	ndg lockscreen
+
+# Power options
+super+shift+l
+	gmenu power
+
+# Display options
+super+p
+	ndg display
+
+# Reset display options
+super+shift+p
+	ndg display -d
+
+# Clipboard manager
+super+shift+c
+	clipmenu
+
+# Unicode characters (copy to clipboard)
+super+u
+	dmenuunicode
+
+# Toggle notifications
+super+i
+	ndg notiftog
+
+# Notifications pop history
+super+ctrl+i
+	dunstctl history-pop
+
+# Close all notifications
+super+shift+i
+	dunstctl close-all
+
+# Take a screenshot
+Print
+	screenshot
+
+# Take a screenshot to clipboard
+ctrl+Print
+	screenshot -c
+
+# Take a screenshot of area
+shift+Print
+	screenshot -a
+
+# Take a screenshot of area to clipboard
+shift+ctrl+Print
+	screenshot -a -c
+
+# Take a screenshot of current window
+alt+Print
+	screenshot -w
+
+# Take a screenshot of current window to clipboard
+alt+ctrl+Print
+	screenshot -w -c
+
+# Show shortcuts help screen
+super+F1
+	gtrm -p 'kb-shortcuts-help | less'
+
+# Show the system monitor
+super+grave
+	ndg taskmanager -1
+
+XF86AudioMute
+	ndg audio mute
+
+XF86AudioMicMute
+	ndg audio mutemic
+
+XF86AudioLowerVolume
+	ndg audio down 5
+
+XF86AudioRaiseVolume
+	ndg audio up   5
+
+super+XF86AudioMute
+	ndg audio pause
+
+super+XF86AudioLowerVolume
+	ndg audio prev
+
+super+XF86AudioRaiseVolume
+	ndg audio next
+
+super+shift+XF86AudioLowerVolume
+	ndg audio back    10
+
+super+shift+XF86AudioRaiseVolume
+	ndg audio forward 10
+
+XF86AudioNext
+	ndg audio next
+
+XF86AudioPrev
+	ndg audio prev
+
+XF86AudioNext+shift
+	ndg audio forward 10
+
+XF86AudioPrev+shift
+	ndg audio back 10
+
+XF86AudioPlay
+	ndg audio pause
+
+XF86AudioStop
+	ndg audio stop
+
+XF86AudioRewind
+	ndg audio back    10
+
+XF86AudioForward
+	ndg audio forward 10
+
+XF86PowerOff
+	gmenu power
+
+XF86Calculator
+	calc-float
+
+XF86Explorer
+	theterm $FILE_MANAGER
+
+XF86WWW
+	ndg browser
+
+XF86ScreenSaver
+	ndg lockscreen
+
+XF86MyComputer
+	theterm $FILE_MANAGER
+
+XF86HomePage
+	ndg browser
+
+XF86Reload
+	restart
+
+XF86TouchpadToggle
+	ndg touchpadtog
+
+XF86TouchpadOn
+	synclient TouchpadOff=0
+
+XF86TouchpadOff
+	synclient TouchpadOff=1
+
+XF86Suspend
+	ndg lockscreen
+
+XF86Close
+	wm-msg window_close
+
+XF86WebCam
+	cam
+
+XF86Search
+	ndg browser https://naheel.xyz/searx
+
+XF86Shop
+	ndg browser https://ebay.com
+
+XF86MonBrightnessDown
+	ndg brightness -dec 15
+
+XF86MonBrightnessUp
+	ndg brightness -inc 15
+
+shift+XF86MonBrightnessDown
+	ndg brightness -dec 1
+
+shift+XF86MonBrightnessUp
+	ndg brightness -inc 1
+
+XF86AudioMedia
+	cmus-tmux-st
+
+XF86Display
+	ndg display
+
+XF86Documents
+	theterm $FILE_MANAGER "$HOME/Documents"
+
+XF86WLAN
+	sudo -A systemctl restart NetworkManager
+
+XF86Tools
+	theterm music-player
+
+XF86Favorites
+	cam
+
+Cancel
+	wm-msg window_nice_close
+
+super+semicolon
+	edit g "$HOME/Notes/TODO.org"
+
+super+shift+semicolon
+	ndg calendar
+
+super+control+r
+	spd-say -w -o piper-generic "$(clipboard)"
+
+super+period
+	pkill highlight-point || highlight-pointer -r 15 -c red
+
+super+shift+period
+	pkill highlight-point || highlight-pointer -r 20 -c red
+
+super+@c
+	xdotool key ctrl+c
+
+super+@x
+	xdotool key ctrl+x
+
+super+@v
+	xdotool key ctrl+v
+
+super+@a
+	xdotool key ctrl+a
+
+super+@z
+	xdotool key ctrl+z
+
+super+@y
+	xdotool key ctrl+y

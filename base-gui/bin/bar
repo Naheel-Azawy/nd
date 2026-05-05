@@ -1,0 +1,1075 @@
+#!/usr/bin/env python3
+
+import sh
+import os
+import sys
+import json
+import re
+import time
+import datetime
+import asyncio
+import threading
+import subprocess
+import socket
+import signal
+import importlib
+import importlib.util
+import importlib.machinery
+import argparse
+import random
+
+def import_path(path):
+    # https://stackoverflow.com/a/56090741/3825872
+    path = os.path.dirname(os.path.realpath(__file__)) + "/" + path
+    module_name = os.path.basename(path).replace('-', '_')
+    spec = importlib.util.spec_from_loader(
+        module_name,
+        importlib.machinery.SourceFileLoader(module_name, path)
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules[module_name] = module
+    return module
+
+wsw    = import_path("wsw")
+xrandr = import_path("xrandr-parse")
+
+try:
+    # sudo pip3 install python-bidi arabic-reshaper
+    import bidi.algorithm
+    import arabic_reshaper
+    use_arabic = True
+except:
+    use_arabic = False
+
+# export FONT_SIZE='Iosevka Fixed:size=12'
+env_font = os.getenv("FONT_SIZE", "monospace")
+try:
+    env_font_size = float(env_font.split(":size=")[1])
+except:
+    env_font_size = 12
+icons_font_size = env_font_size * 1.333
+
+themes = {
+    "awesome": {
+        # https://fontawesome.com/icons
+        # https://www.nerdfonts.com/font-downloads
+        "icons_font": f"CaskaydiaMono NF:size={icons_font_size}",
+        "icons": {
+            "exclamation": " ",
+            "plug":        " ",
+            "battery30":   "",
+            "battery50":   "",
+            "battery60":   "",
+            "battery90":   "",
+            "battery100":  "",
+            "wifi1":       "",
+            "wifi2":       "",
+            "wifi3":       "",
+            "wifi4":       "",
+            "prayer":      "",
+            "cloud":       "",
+            "temp90":      "",
+            "temp50":      "",
+            "temp40":      "",
+            "temp30":      "",
+            "power":       "",
+            "more":        "",
+            "plus":        "",
+            "close":       "",
+            "keyboard":    "",
+            "bluetooth":   "",
+        }
+    },
+
+    "ascii": {
+        "icons_font": None,
+        "icons": {
+            "exclamation": "!",
+            "plug":        "~",
+            "battery30":   "b",
+            "battery50":   "b",
+            "battery60":   "b",
+            "battery90":   "b",
+            "battery100":  "b",
+            "wifi1":       "s",
+            "wifi2":       "s",
+            "wifi3":       "s",
+            "wifi4":       "s",
+            "prayer":      "p",
+            "cloud":       "w",
+            "temp90":      "t",
+            "temp50":      "t",
+            "temp40":      "t",
+            "temp30":      "t",
+            "power":       "p",
+            "more":        "<",
+            "plus":        "+",
+            "close":       "x",
+            "keyboard":    "k",
+            "bluetooth":   "h",
+        }
+    }
+}
+
+def find_theme():
+    font_to_theme = {}
+    for t in themes:
+        if themes[t]["icons_font"] is None:
+            continue
+        font_to_theme[themes[t]["icons_font"].split(":")[0]] = t
+
+    fonts_list = []
+    for l in sh.fc_list().split("\n"):
+        try:
+            fonts_list.append(l.split(":")[1].strip())
+        except:
+            continue
+    for f in font_to_theme:
+        for l in fonts_list:
+            if f in l:
+                return font_to_theme[f]
+    return "ascii"
+
+theme      = find_theme()
+icons_font = themes[theme]["icons_font"]
+icons      = themes[theme]["icons"]
+background = '#ff000000'
+foreground = '#ffffff'
+
+# if a second clock needed
+gmt_there = None
+gmt_here = time.localtime().tm_gmtoff / 60 / 60
+if gmt_there is not None:
+    gmt_diff = gmt_there - gmt_here
+else:
+    gmt_diff = None
+
+default_items = "workspaces program | clock | battery host"
+
+port_file = "/tmp/.nbarport"
+pid_file  = "/tmp/.nbarpid"
+
+START_XBM = """
+#define start_width 18
+#define start_height 16
+static unsigned char start_bits[] = {
+0x00, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x00, 0xff, 0x00, 0x82, 0xdb, 0x01,
+0xea, 0x99, 0x01, 0xf8, 0x99, 0x01, 0x82, 0xbd, 0x01, 0xea, 0xff, 0x01,
+0xf8, 0xdb, 0x01, 0x82, 0x99, 0x01, 0xea, 0x99, 0x01, 0xf8, 0xbd, 0x01,
+0x82, 0xff, 0x01, 0xea, 0xc3, 0x01, 0xf8, 0x00, 0x01, 0x00, 0x00, 0x00};
+"""
+
+argv = sys.argv
+HOME = os.getenv("HOME")
+
+def grep(pattern: str, filename: str, ignore_case: bool = False,
+         invert_match: bool = False, line_numbers: bool = False):
+    flags = re.IGNORECASE if ignore_case else 0
+    regex = re.compile(pattern, flags)
+    results = []
+    with open(filename, 'r') as file:
+        for lineno, line in enumerate(file, 1):
+            match = bool(regex.search(line))
+            if match != invert_match:
+                line_output = f"{lineno}:{line}" if line_numbers else line
+                results.append(line_output.rstrip('\n'))
+    return results
+
+def exec_lines_cb(argv, cb):
+    popen = subprocess.Popen(argv,
+                             stdout=subprocess.PIPE,
+                             universal_newlines=True)
+    for line in iter(popen.stdout.readline, ""):
+        cb(line)
+    popen.stdout.close()
+    code = popen.wait()
+    if code != 0:
+        raise Exception(f"{argv[0]} exited with code {code}")
+
+# example: await Battery(print).run()
+class Battery:
+    def __init__(self, callback):
+        self.callback = callback
+        self.devs = {}
+        self.devs_simple = {}
+        self.last_dev = None
+
+    def actual_cb(self):
+        self.devs_simple = self.simplify()
+        if self.callback is not None:
+            self.callback(self.devs_simple)
+            self.check(self.devs_simple)
+
+    async def run(self):
+        try:
+            await asyncio.to_thread(self.loop)
+        except Exception:
+            raise Exception(f"upower thread failed")
+        except asyncio.exceptions.CancelledError:
+            pass
+
+    def loop(self):
+        exec_lines_cb(["upower", "--dump"], lambda l: self.parse(l, silent=True))
+        self.actual_cb()
+        exec_lines_cb(["upower", "--monitor-detail"], self.parse)
+
+    def parse(self, line, silent=False):
+        if line == "\n" and not silent:
+            self.actual_cb()
+
+        line = line.strip()
+        if m := \
+           re.match(r"^Device: (.+)$", line) or \
+           re.match(r"^\[[0-9:\.]+\]\s+device changed:\s+(.+)$", line) or \
+           re.match(r"^\[[0-9:\.]+\]\s+device added:\s+(.+)$", line):
+            self.last_dev = m[1]
+            if self.last_dev not in self.devs:
+                self.devs[self.last_dev] = {"name": self.last_dev}
+
+        elif m := re.match(r"^\[[0-9:\.]+\]\s+device removed:\s+(.+)$", line):
+            self.last_dev = m[1]
+            if self.last_dev in self.devs:
+                del self.devs[self.last_dev]
+            self.last_dev = None
+
+        elif self.last_dev is not None:
+            pair = line.split(":")
+            if len(pair) == 2:
+                attr = pair[0].strip()
+                val  = pair[1].strip()
+                self.devs[self.last_dev][attr] = val
+
+    def simplify(self):
+        devs = self.devs
+        simple = {
+            "batteries": [],
+            "acs":       [],
+            "headsets":  [],
+        }
+        names = list(devs.keys())
+
+        for name in devs:
+            dev = devs[name]
+            name_min = name.split("/")[-1]
+
+            if "battery_BAT" in name:
+                simple["batteries"].append({
+                    "name":       name_min,
+                    "percentage": int(dev["percentage"][:-1]),
+                    "charging":   dev["state"] == "charging"
+                })
+            elif "line_power_AC" in name:
+                simple["acs"].append({
+                    "name":   name_min,
+                    "online": dev["online"] == "yes"
+                })
+            elif "headset_dev_" in name:
+                if "model" in dev and dev["model"] not in names:
+                    name_min = dev["model"]
+                simple["headsets"].append({
+                    "name":       name_min,
+                    "percentage": int(dev["percentage"][:-1])
+                })
+        return simple
+
+    def check(self, devs):
+        # TODO: watch battery, send warnings, shutdown/hybernate
+        pass
+
+# example: WM(lambda s: print(s)).run()
+class WM:
+    def __init__(self, callback, bar=None):
+        try:
+            self.impl = wsw.init(output="lemonbar_circles_mini",
+                                 onchange=callback, bar=bar)
+        except:
+            self.impl = None
+        self.title = None # to be set by bar.program()
+        self.ic    = None # to be set by bar.program()
+        # names to be picked for new workspaces
+        self.nice_workspaces = list(range(1, 10)) + [0]
+        self.nice_workspaces = list(map(lambda i: str(i), self.nice_workspaces))
+
+    async def run(self):
+        if self.impl is None:
+            return
+        count = 0
+        while count < 10:
+            try:
+                await asyncio.to_thread(self.impl.run)
+                break
+            except Exception:
+                # in case the bar started before the window manager
+                await asyncio.sleep(1)
+
+    def update(self):
+        self.impl.send_callback()
+
+XPROP_ICON = r"""-notype 32c _NET_WM_ICON |
+  perl -0777 -pe '@_=/\d+/g;
+    printf "P7\nWIDTH %d\nHEIGHT %d\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n", splice@_,0,2;
+    $_=pack "N*", @_;
+    s/(.)(...)/$2$1/gs' | magick - -alpha off -auto-threshold otsu -negate -resize x24 """
+def xprop_gen_ic(winid, cls):
+    fdir = f"{HOME}/.cache/bar/icons"
+    fname = f"{fdir}/{cls}.xbm"
+    # TODO: mkdirs -p
+    if not os.path.exists(fname):
+        os.popen(f"xprop -id {winid}" +
+                 XPROP_ICON +
+                 fname + " 2>/dev/null")
+    return fname
+
+class XTitle:
+    def __init__(self, callback):
+        self.callback = callback
+
+    async def run(self):
+        try:
+            await asyncio.to_thread(self.loop)
+        except Exception:
+            raise Exception(f"xtitle thread failed")
+
+    def loop(self):
+        popen = subprocess.Popen(["xtitle", "-s", "-f", r"%u %s\n"],
+                                 stdout=subprocess.PIPE,
+                                 universal_newlines=True)
+        for line in iter(popen.stdout.readline, ""):
+            line = line.strip().split(" ")
+            winid = line[0]
+            title = " ".join(line[1:])
+            cls, ic = None, None
+            # try:
+            #     cls = sh.xprop("-id", winid, "WM_CLASS") \
+            #             .split(" = \"")[1].split("\", ")[0]
+            #     ic = xprop_gen_ic(winid, cls)
+            # except:
+            #     pass
+            self.callback(title, winid, cls, ic)
+        popen.stdout.close()
+        code = popen.wait()
+        if code != 0:
+            raise Exception(f"xtitle exited with code {code}")
+
+def item(period=0, big=False):
+    """A decorator to simplify defining periodic functions"""
+    def decorate(func):
+        def wrapper(*args, **kwargs):
+            if "period" in args:
+                return period
+            elif "name" in args:
+                return func.__name__
+            elif "big" in args:
+                return big
+            else:
+                return func(*args, **kwargs)
+        return wrapper
+    return decorate
+
+def avg_clr(clr):
+    r = int(clr[1:3], 16)
+    g = int(clr[3:5], 16)
+    b = int(clr[5:7], 16)
+    return (r + g + b) / 3
+
+def fg2_from_fg1(fg1):
+    avg = avg_clr(fg1)
+    if avg == 0:
+        avg = 1
+    if avg > 190:
+        avg /= 5
+    elif avg < 64:
+        avg *= 100
+    return "#" + ("%02x" % int(avg)) * 3
+
+class BarBase:
+    def __init__(self, use_ascii=False, items=None, outs=[sys.stdout], minis=[False]):
+        self.server = None
+        self.ws_str = None # to be set from wsw
+        self.a = use_ascii
+        self.dbgc = background
+        self.dfgc = foreground
+        self.dfgc2 = fg2_from_fg1(self.dfgc)
+        self.wm = WM(self.run_wm_items, self)
+        self.xtitle = XTitle(self.run_xtitle_items)
+        self.battery_listener = Battery(self.run_battery_items)
+
+        man_path = "/usr/share/man/man1/lemonbar.1"
+        self.supports_dynamic_colors = bool(grep('.IX Header "PRE_FORMATTING"', man_path))
+        self.supports_icons = bool(grep('.IX Item "Ifilename"', man_path))
+
+        if len(minis) != len(outs):
+            minis = [False] * len(outs)
+        self.outs = outs
+        self.minis = minis
+
+        if items is not None:
+            self.items_str = items
+        elif not hasattr(self, "items_str"):
+            self.items_str = default_items
+
+        places = re.split(r"\s*\|\s*", self.items_str)
+
+        self.items_map = {"l": [], "c": [], "r": []}
+        for i in range(len(places)):
+            place = [getattr(self, m)
+                     for m in re.split(r"\s+", places[i]) if m]
+            if i == 0:
+                self.items_map["l"] += place
+            elif i == 1:
+                self.items_map["c"] += place
+            else:
+                self.items_map["r"] += place
+
+        self.items = self.items_map["l"] + \
+            self.items_map["c"] + \
+            self.items_map["r"]
+
+        self.last = {}
+        self.running = False
+        self.coroutines = []
+        self.tasks = None
+
+    def print_items(self):
+        for i in self.items:
+            print(i("name"), i("period"))
+
+    def render(self):
+        for i in range(len(self.outs)):
+            o    = self.outs[i]
+            mini = self.minis[i]
+            out = ""
+            if self.a:
+                items_out = []
+                for item in self.items:
+                    content = self.last[item("name")]
+                    if not content: continue
+                    items_out.append(content)
+                out += " | ".join(items_out)
+            else:
+                for place in self.items_map:
+                    out += f"%{{{place}}}"
+                    items_out = []
+                    for item in self.items_map[place]:
+                        if not mini or (mini and not item("big")):
+                            content = self.last[item("name")]
+                            if not content: continue
+                            items_out.append(content)
+                    out += "  ".join(items_out)
+                out += " "
+                if self.supports_dynamic_colors:
+                    out = f"%{{B{self.dbgc}}}%{{F{self.dfgc}}}%{{BEGIN}}" + out
+
+            o.write(out + "\n")
+            try:
+                o.flush()
+            except BrokenPipeError:
+                exit(0)
+
+    def run_item(self, item):
+        if item in self.items:
+            self.last[item("name")] = item()
+
+    async def run_periodic_item(self, item):
+        if item not in self.items:
+            return
+        while self.running:
+            self.run_item(item)
+            self.render()
+            # print(f">>>>> CALLED {item('name')}, sleeping {item('period')}\n")
+            period = item("period")
+            if period <= 0:
+                break
+            await asyncio.sleep(period)
+
+    def run_wm_items(self, ws_str):
+        self.ws_str = ws_str
+        self.run_item(self.workspaces)
+        self.run_item(self.program)
+        self.render()
+
+    def run_xtitle_items(self, title, winid, cls, ic):
+        self.wm.title = title
+        self.wm.ic    = ic
+        self.run_item(self.program)
+        self.render()
+
+    def run_battery_items(self, _):
+        self.run_item(self.battery)
+        self.render()
+
+    async def handle_connection(self, reader, writer):
+        data = b""
+        while True:
+            tmp = await reader.read(1024)
+            data += tmp
+            if not tmp: break
+        data = data.decode().split("?")
+        cmd = data[0]
+        data = data[1]
+
+        if cmd == "hello":
+            # connection will fail if not running
+            # so no need to have any logic here
+            pass
+        elif cmd == "update":
+            item = getattr(self, data)
+            self.last[item("name")] = item()
+            self.render()
+        elif cmd == "update-bg":
+            self.dbgc = data
+            self.wm.update()
+            self.render()
+        elif cmd == "update-fg":
+            self.dfgc = data
+            self.dfgc2 = fg2_from_fg1(self.dfgc)
+            self.wm.update()
+            self.render()
+
+    def init(self):
+        for item in self.items:
+            self.run_item(item)
+
+    async def run(self):
+        if self.running:
+            return
+        self.running = True
+        self.init()
+        self.render()
+        coroutines = []
+
+        # window manager
+        if self.wm is not None:
+            coroutines.append(self.wm.run())
+
+        # xtitle
+        if self.xtitle is not None:
+            coroutines.append(self.xtitle.run())
+
+        # battery
+        if self.battery_listener is not None:
+            coroutines.append(self.battery_listener.run())
+
+        # periodic items
+        for item in self.items:
+            if item("period") > 0:
+                coroutines.append(self.run_periodic_item(item))
+
+        # server
+        server = await asyncio.start_server(
+            self.handle_connection, "localhost", 0)
+        port = server.sockets[0].getsockname()[1]
+        with open(port_file, "w") as f:
+            f.write(str(port))
+        coroutines.append(server.serve_forever())
+        self.tasks = asyncio.gather(*coroutines)
+        try:
+            await self.tasks
+        except asyncio.CancelledError:
+            pass
+
+    def stop(self):
+        self.running = False
+        self.tasks.cancel()
+
+class Bar(BarBase):
+
+    items_str = "start workspaces program | clock | systray profile keyboard pray weather temperature wifi battery power"
+
+    @item(big=False)
+    def workspaces(self):
+        if self.wm is None or self.wm.impl is None or self.a:
+            return None
+        wmcmd = self.wm.impl.workspace_cmd
+        count = len(self.wm.impl.workspaces)
+        if count > 1:
+            ret =  f"%{{A:{wmcmd} prev&:}}<  %{{A}}"
+            ret += self.ws_str or ""
+            ret += f"%{{A:{wmcmd} next&:}}  >%{{A}}"
+            return ret
+        else:
+            return None
+
+    @item()
+    def program(self):
+        if self.wm is None or self.wm.title is None:
+            return None
+        # not accurate, depends on the resolution and font size, but too lazy
+        if "workspaces" in self.items_str and self.wm.impl is not None:
+            max_title = 50 - int(len(self.wm.impl.workspaces) * 1.5)
+        else:
+            max_title = 80
+        title = self.wm.title
+        if len(title) > max_title:
+            title = title[:max_title].strip() + "…"
+        if use_arabic:
+            title = bidi.algorithm.get_display(
+                arabic_reshaper.reshape(title))
+        if self.a:
+            return title
+        else:
+            out = ""
+            if title:
+                ad = "%{A:wm-msg workspace_new:}"     + icons["plus"]  + "%{A} "
+                cl = "%{A:wm-msg window_nice_close:}" + icons["close"] + "%{A} "
+                if self.wm.ic:
+                    ic = "%{I" + self.wm.ic + "} "
+                else:
+                    ic = ""
+                return ad + cl + ic + "%{A:wm-msg program-menu&:}" + title + "%{A}"
+            else:
+                return None
+
+    @item(period=1, big=True)
+    def clock(self):
+        now = datetime.datetime.now()
+        t = now.strftime("%a %Y.%m.%d %I:%M:%S %p")
+        if gmt_diff is not None:
+            there = now + datetime.timedelta(hours=gmt_diff)
+            t += there.strftime(" (%I %p %d)")
+        if self.a:
+            return t
+        else:
+            cmd = "gtrm --dims 68x35 -p 'ndg calendar'"
+            return f"%{{A:{cmd}&:}}{t}%{{A}}"
+
+    @item(big=True)
+    def battery(self):
+        if not self.battery_listener.devs_simple:
+            return None
+
+        devs = self.battery_listener.devs_simple
+
+        out_acs   = ""
+        out_batts = ""
+        out_heads = ""
+
+        plugged = False
+        for dev in devs["acs"]:
+            if dev["online"]:
+                plugged = True
+                if self.a:
+                    out_acs += "~"
+                else:
+                    out_acs += icons["plug"]
+
+        r = self.dfgc
+        for dev in devs["batteries"]:
+            percent  = dev["percentage"]
+            charging = dev["charging"]
+            if self.a:
+                out_batts += f"b{percent}%%"
+                if not charging:
+                    out_batts += "-"
+                out_batts += " "
+            else:
+                if charging:
+                    r = self.dfgc if percent >= 99 else '#FFD700'
+                elif percent <= 20:
+                    if percent > 10:
+                        r = '#FF0000'
+                    else:
+                        r = '#000000'
+                    if percent <= 15:
+                        out_batts += icons["exclamation"]
+
+                if percent < 30:
+                    out_batts += icons["battery30"]
+                elif percent < 50:
+                    out_batts += icons["battery50"]
+                elif percent < 70:
+                    out_batts += icons["battery60"]
+                elif percent < 99:
+                    out_batts += icons["battery90"]
+                else:
+                    out_batts += icons["battery100"]
+
+                out_batts += f" {percent}%% "
+
+        for dev in devs["headsets"]:
+            percent = dev["percentage"]
+            if self.a:
+                out_heads += f"h{percent}%% "
+            else:
+                out_heads += icons["bluetooth"] + f"{percent}%% "
+
+        out_acs   = out_acs.strip()
+        out_batts = out_batts.strip()
+        out_heads = out_heads.strip()
+
+        out = f"{out_acs}{out_batts} {out_heads}".strip()
+
+        if not self.a:
+            if percent <= 10 and not charging:
+                out = "%{B#FF0000} " + out + " %{B-}"
+            cmd = "gtrm --dims 75x3 -p 'watch -tn 1 acpi -i'"
+            out = f"%{{A:{cmd}&:}}{out}%{{A}}"
+            if r != self.dfgc:
+                out = f"%{{F{r}}}{out}%{{F-}}"
+
+        return out
+
+    @item(period=3, big=True)
+    def profile(self):
+        # https://wiki.archlinux.org/title/Lenovo_ThinkPad_X1_Carbon_(Gen_10)#Performance_modes
+        profile = None
+        profilef = "/sys/firmware/acpi/platform_profile"
+        if os.path.exists(profilef):
+            try:
+                with open(profilef, "r") as f:
+                    profile = f.read().strip()[0]
+            except:
+                pass
+        return profile
+
+    @item(period=3, big=True)
+    def battery_periodic(self):
+        # TODO: move logic to Battery class as a fallback of upower
+        try:
+            acpi = None
+            for bat in sh.acpi("-b").strip().split("\n"):
+                if "unavailable" not in bat:
+                    acpi = bat
+                    break
+            percent = int(acpi.split(", ")[1].replace("%", ""))
+            charging = "Charging" in acpi
+            plugged = charging or "Not charging" in acpi
+        except:
+            return None
+
+        if self.a:
+            charging = "~" if charging else ""
+            return f"b{charging}{percent}%"
+        else:
+            out = ""
+            r = "-"
+
+            if charging:
+                r = self.dfgc if percent >= 99 else '#FFD700'
+            elif percent <= 20:
+                if percent > 10:
+                    r = '#FF0000'
+                else:
+                    r = '#000000'
+                if percent <= 15:
+                    out += icons["exclamation"]
+
+            if plugged:
+                out += icons["plug"]
+
+            if percent < 30:
+                out += icons["battery30"]
+            elif percent < 50:
+                out += icons["battery50"]
+            elif percent < 70:
+                out += icons["battery60"]
+            elif percent < 99:
+                out += icons["battery90"]
+            else:
+                out += icons["battery100"]
+
+            out += f" {percent}%%"
+
+            if percent <= 10 and not charging:
+                out = "%{B#FF0000} " + out + " %{B-}"
+
+            cmd = "gtrm --dims 75x3 -p 'watch -tn 1 acpi -i'"
+            out = f"%{{F{r}}}%{{A:{cmd}&:}}{out}%{{A}}%{{F-}}"
+
+            return out
+
+    @item(period=5, big=True)
+    def wifi(self):
+        try:
+            with open("/proc/net/wireless") as f:
+                v = re.split(r"\s+", f.read().split("\n")[2])
+                iface = v[0][:-1]
+                v = int(float(v[2]))
+                if self.a:
+                    return f"s{v}%"
+                else:
+                    if v >= 90:
+                        ic = icons["wifi4"]
+                    elif v >= 60:
+                        ic = icons["wifi3"]
+                    elif v >= 40:
+                        ic = icons["wifi2"]
+                    else:
+                        ic = icons["wifi1"]
+                    cmd = "gtrm --dims 120x20 -p 'nmcli con show; echo; " + \
+                        f"ip --color=always addr show dev {iface}'"
+                    return f"%{{A:{cmd}&:}}{ic} {v}%%%{{A}}"
+        except:
+            pass
+        return None
+
+    @item(period=30, big=True)
+    def pray(self):
+        cfg = 'c=~/.config/prayer/rc; [ -e "$c" ] && . "$c";'
+        out = os.popen(cfg + "prayer --mini 2>/dev/null").read().strip()
+        if not out:
+            return None
+        if self.a:
+            return f"p{out}"
+        else:
+            cmd = cfg + "gtrm -p 'watch -ctn 15 prayer' --dims 25x8"
+            return f"%{{A:{cmd}&:}} " + icons["prayer"] + \
+                f" {out}%{{A}}"
+
+    @item(period=30 * 60, big=True)
+    def weather(self):
+        fpath = f"{HOME}/.cache/weatherreport"
+        # try:
+        #     sh.curl("-s", "wttr.in?n", _out=fpath)
+        # except:
+        #     pass
+        if not os.path.exists(fpath):
+            return None
+
+        with open(fpath, "rb") as f:
+            try:
+                out = f.read().decode(errors="ignore").split("\n")[3] # third line
+            except:
+                return None
+            # remove colors https://stackoverflow.com/a/14693789/3825872
+            r = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+            out = r.sub("", out).strip()
+            try:
+                temp = re.search(".+ (.+) °C.*", out).group(1)
+            except:
+                return None
+            try:
+                temp = re.search(r".+\((\d+)\)", temp).group(1)
+            except:
+                pass
+            out = f"{temp}°C"
+
+            if self.a:
+                return f"w{out}"
+            else:
+                cmd = f"gtrm -p wttr --dims 63x28"
+                return f"%{{A:{cmd}&:}} " + icons["cloud"] + f" {out}%{{A}}"
+
+        return None
+
+    @item(period=5, big=True)
+    def temperature(self):
+        try:
+            o = json.loads(sh.sensors("coretemp-isa-0000", "-j").strip()) \
+                ["coretemp-isa-0000"]["Package id 0"]
+            t = float(o["temp1_input"])
+            m = float(o["temp1_max"])
+        except:
+            return None
+
+        percent = int((t / m) * 100)
+        if percent < 70:
+            return None
+
+        if self.a:
+            return f"t{int(t)}°C"
+        else:
+            out = ""
+            if percent > 90:
+                out += "%{F#FF0000}" + icons["temp90"]
+            elif percent > 50:
+                out += icons["temp50"]
+            elif percent > 40:
+                out += icons["temp40"]
+            else:
+                out += icons["temp30"]
+            out += f" {int(t)}°C %{{F-}}"
+            cmd = "gtrm --dims 65x19 -p 'watch -tn 1 sensors'"
+            return f"%{{A:{cmd}&:}}{out}%{{A}}"
+
+    @item()
+    def start(self):
+        if self.a:
+            return None
+        ret = "%{A:ndg start_menu&:}"
+        if self.supports_icons:
+            fpath = f"{HOME}/.cache/start.xbm"
+            if not os.path.exists(fpath):
+                with open(fpath, "w") as f:
+                    f.write(START_XBM)
+            ret += f" %{{I{fpath}}}"
+        ret += " Start%{A}"
+        return ret
+
+    @item()
+    def power(self):
+        return "%{A:gmenu power&:}" + icons["power"] + \
+            "%{A}" if not self.a else None
+
+    @item(big=True)
+    def systray(self):
+        return "%{A:ndg systraytog&:}" + icons["more"] + \
+            "%{A}" if not self.a else None
+
+    @item(big=True)
+    def donno(self):
+        return "%{A:gtrm -p 'lolcowforune -p'&:}¯\\_(ツ)_/¯%{A}" \
+            if not self.a else None
+
+    @item(big=True, period=3)
+    def die(self):
+        r = random.randint(1, 6)
+        return f"\ueb40 {r}"
+
+    @item(big=True)
+    def host(self):
+        return os.uname()[1]
+
+    @item(big=True)
+    def keyboard(self):
+        if self.a or self.wm.impl is None:
+            return None
+        try:
+            # https://askubuntu.com/a/520360
+            k = os.popen("udevadm info --export-db | grep ID_INPUT_TOUCHSCREEN=1").read()
+            if not k:
+                return None
+        except:
+            # only show in touch screen devices
+            return None
+        return "%{A:pkill onboard || onboard &:}" + icons["keyboard"] + "%{A}"
+
+def lemon_kill():
+    if os.path.exists(pid_file):
+        with open(pid_file, "r") as f:
+            pid = int(f.read())
+            try:
+                sh.kill(pid)
+            except sh.ErrorReturnCode_1:
+                pass
+
+def lemonbar():
+    lemon_kill()
+    with open(pid_file, "w") as f:
+        f.write(str(os.getpid()))
+
+    monitors = [o for o in xrandr.parse() if o["connected"] and o["geometry"]]
+
+    fonts = []
+    if env_font:
+        fonts += ["-f", env_font]
+    if icons_font is not None:
+        fonts += ["-f", icons_font]
+    fonts += [
+        "-f", "Kawkab Mono:pixelsize=12",
+        "-f", "Source Han Sans CN",
+        "-f", "DejaVu Sans Mono",
+    ]
+
+    args = ["lemonbar", "-B", background, "-F", foreground, "-a", "30"] + fonts
+
+    # map x,y values to geometries
+    # useful when multiple monitors start at the same point
+    # the smallest w will be used in this case
+    xy2g = {}
+    for mon in monitors:
+        g = mon["geometry"]
+        index = f"{g['x']},{g['y']}"
+        if index in xy2g:
+            if xy2g[index]['w'] > g['w']:
+                xy2g[index] = g
+        else:
+            xy2g[index] = g
+
+    # looks like lemonbar sets geometries incorrectly
+    # https://github.com/LemonBoy/bar/issues/163
+    # hard-codding a special case for now...
+    # TODO: fix and/or cleanup somehow
+    fingerprint = ";".join(xy2g.keys())
+    if fingerprint == "0,1080;0,0;1920,0":
+        xy2g["1920,0"]['x'] = 1920 * 2
+
+    # start a lemonbar process for each geometry
+    lemons = []
+    lemons_stdin = []
+    minis = []
+    for g in xy2g.values():
+        # print(["-g", f"{g['w']}x+{g['x']}+{g['y']}"])
+        lemonp = subprocess.Popen(args + ["-g", f"{g['w']}x+{g['x']}+{0}"],
+                                  stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE,
+                                  universal_newlines=True)
+        lemons.append(lemonp)
+        lemons_stdin.append(lemonp.stdin)
+        minis.append(g['w'] < g['h'])
+
+        def lemon_output_handler():
+            for line in iter(lemonp.stdout.readline, ""):
+                os.system(line.strip())
+            lemonp.stdout.close()
+
+        threading.Thread(target=lemon_output_handler).start()
+
+    # but a single thread providing inputs to lemonbars
+    bar = Bar(items=None, outs=lemons_stdin, minis=minis)
+    signal.signal(signal.SIGINT, lambda signal, frame: bar.stop())
+    threading.Thread(target=lambda: asyncio.run(bar.run())).start()
+
+    for l in lemons:
+        l.wait()
+
+    os.remove(pid_file)
+
+async def send_cmd(cmd, arg=None):
+    cmd = cmd.encode()
+    arg = arg.encode() if arg else b""
+    with open(port_file, "r") as f:
+        try:
+            port = int(f.read())
+            reader, writer = await asyncio.open_connection("localhost", port)
+            writer.write(cmd + b"?" + arg)
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+            return 0
+        except:
+            return 1
+
+async def async_main(args):
+    if args.kill:
+        lemon_kill()
+    elif args.is_running:
+        return await send_cmd("hello")
+    elif args.update:
+        item = args.update
+        return await send_cmd("update", item)
+    elif args.update_bg:
+        clr = args.update_bg
+        return await send_cmd("update-bg", clr)
+    elif args.update_fg:
+        clr = args.update_fg
+        return await send_cmd("update-fg", clr)
+    elif len(args.items) > 0:
+        bar = Bar(use_ascii=args.ascii, items=" ".join(args.items))
+        if args.persistent:
+            signal.signal(signal.SIGINT, lambda signal, frame: bar.stop())
+            await bar.run()
+        else:
+            bar.init()
+            bar.render()
+    else:
+        lemonbar()
+    return 0
+
+def main():
+    parser = argparse.ArgumentParser(prog="bar", description="top bar UI")
+    parser.add_argument("-r", "--is-running", action="store_true",      help="return 0 if bar server is running")
+    parser.add_argument("-k", "--kill",       action="store_true",      help="kill bar process")
+    parser.add_argument("-u", "--update",     type=str, default=None,   help="update a bar item")
+    parser.add_argument("-B", "--update-bg",  type=str, default=None,   help="dynamically change default background")
+    parser.add_argument("-F", "--update-fg",  type=str, default=None,   help="dynamically change default foreground")
+    parser.add_argument("-a", "--ascii",      action="store_true",      help="output ascii only")
+    parser.add_argument("-p", "--persistent", action="store_true",      help="keep running in a loop")
+    parser.add_argument("items",              type=str, nargs="*",      help="items to be printed")
+    args = parser.parse_args()
+
+    return asyncio.run(async_main(args))
+
+if __name__ == "__main__":
+    exit(main())

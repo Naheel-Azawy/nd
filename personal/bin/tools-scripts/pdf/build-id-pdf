@@ -1,0 +1,23 @@
+#!/bin/sh
+NAME="__id-pdf-$$"
+
+{
+    printf '\\documentclass[11pt]{article}\n'
+    printf '\\usepackage{graphicx}\n'
+    printf '\\pagenumbering{gobble}\n'
+    printf '\\begin{document}\n'
+    printf '\\begin{center}\n'
+    printf '\\includegraphics[width=.7\\linewidth]{%s}\n' "$1"
+    printf '\\end{center}\n'
+    [ -n "$2" ] && {
+        printf '\\vspace{1cm}\n'
+        printf '\\begin{center}\n'
+        printf '\\includegraphics[width=.7\\linewidth]{%s}\n' "$2"
+        printf '\\end{center}\n'
+    }
+    printf '\\end{document}\n'
+} > "${NAME}.tex"
+
+pdflatex "${NAME}.tex" >/dev/null &&
+    mv "${NAME}.pdf" "$1.pdf"
+rm -f "${NAME}.tex" "${NAME}.aux" "${NAME}.log" "${NAME}.out"

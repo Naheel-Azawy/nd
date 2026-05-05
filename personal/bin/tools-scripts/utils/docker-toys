@@ -1,0 +1,116 @@
+#!/bin/sh
+
+command -v fish >/dev/null &&
+    echo "
+complete -c docker-toys -a ocrmypdf -a      'OCR a pdf file'
+complete -c docker-toys -a searx -a         'Meta search engine'
+complete -c docker-toys -a droppy -a        'File manager server'
+complete -c docker-toys -a cryptominisat -a 'SAT solver'
+complete -c docker-toys -a die -a           'Kill all'
+complete -c docker-toys -a burn -a          'Kill all and burn all containers'
+complete -c docker-toys -a size -a          'Containers sizes'
+" | fish
+
+die() {
+    PS=$(docker ps -q)
+    [ "$PS" ] && {
+        echo 'Killing all...'
+        docker kill $PS
+    }
+    PS=$(docker ps -qa)
+    [ "$PS" ] && {
+        echo 'Removing all...'
+        docker rm $PS
+    }
+}
+
+alias pop='_pop $#; eval "$POP_EXPR"'
+_pop() {
+    # https://stackoverflow.com/a/63864756/3825872
+    __pop_n=$(($1 - ${2:-1}))
+    if [ $__pop_n -ge 500 ]; then
+        POP_EXPR="set -- $(seq -s " " 1 $__pop_n | sed 's/[0-9]\+/"${\0}"/g')"
+    else
+        __pop_index=0
+        __pop_arguments=""
+        while [ $__pop_index -lt $__pop_n ]; do
+            __pop_index=$((__pop_index+1))
+            __pop_arguments="$__pop_arguments \"\${$__pop_index}\""
+        done
+        POP_EXPR="set -- $__pop_arguments"
+    fi
+}
+
+CMD="$1"
+shift
+case "$CMD" in
+    enhance)
+        # https://github.com/alexjc/neural-enhance#2a-using-docker-image-recommended
+        FILEPATH=$(eval echo "\$$#")
+        if [ $# -gt 0 ] && [ -f "$FILEPATH" ]; then
+            FILEPATH=$(realpath "$FILEPATH")
+            pop # remove last argument
+            NAME=$(basename "$FILEPATH")
+            DIR=$(dirname "$FILEPATH")
+            TMP=$(mktemp -d)
+            cp "$FILEPATH" "$TMP"
+            docker run --rm  -v "$TMP":/ne/input -it alexjc/neural-enhance "$@" "/ne/input/$NAME" &&
+                cp "$TMP"/*ne* "$DIR" &&
+                rm -rf "$TMP"
+        else
+            docker run --rm -it alexjc/neural-enhance "$@"
+        fi;;
+
+    doodle)
+        #docker run -v $(pwd)/samples:/nd/samples -v $(pwd)/frames:/nd/frames -it alexjc/neural-doodle
+        docker run -it alexjc/neural-doodle "$@"
+        ;;
+
+    ocrmypdf)
+        if [ -f "$1" ]; then
+            SRC=$(realpath "$1")
+            #DST=$(realpath "$2")
+            DST="$SRC.ocr.pdf"
+            shift #2
+            SRCN=$(basename "$SRC")
+            DSTN=$(basename "$DST")
+            TMP=$(mktemp -d)
+            cp "$SRC" "$TMP"
+            docker run --rm -v "$TMP":/tmp jbarlow83/ocrmypdf --force-ocr /tmp/"$SRCN" /tmp/"$DSTN" "$@" &&
+                mv "$TMP/$DSTN" "$DST"
+            rm -rf "$TMP"
+        else
+            docker run --rm jbarlow83/ocrmypdf "$@"
+        fi;;
+
+    searx)
+        docker run -d --name searx -p 3333:8888 wonderfall/searx "$@";;
+
+    droppy)
+        docker run --name droppy -p 127.0.0.1:8989:8989 silverwind/droppy "$@";;
+
+    cryptominisat)
+        docker run --rm -i msoos/cryptominisat "$@";;
+
+    die)
+        die;;
+
+    burn)
+        printf 'Gas all containers? Sure? (y/N) '
+        read -r ans
+        [ "$ans" = y ] && {
+            die
+            IMGS=$(docker images -q)
+            [ "$IMGS" ] && {
+                echo 'Removing images...'
+                docker rmi --force $IMGS
+            }
+        };;
+
+    size)
+        docker system df -v;;
+
+    *)
+        echo 'What??'
+        exit 1;;
+esac

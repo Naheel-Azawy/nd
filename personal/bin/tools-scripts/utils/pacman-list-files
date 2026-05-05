@@ -1,0 +1,2 @@
+#!/bin/sh
+pacman -Qlq "$1" | grep -v '/$' | xargs du -h | sort -h

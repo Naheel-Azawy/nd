@@ -1,0 +1,8 @@
+#!/bin/sh
+IN="$1"
+D="$IN-frames"
+O="$IN.gif"
+mkdir "$D"
+ffmpeg -i "$IN" -vf fps=3 "$D/%05d.jpg"
+convert -loop 0 -delay 10x100 "$D/*.jpg" "$O"
+#rm -rf "$D"
