@@ -31,11 +31,11 @@ else
         exit 1
     fi
     echo 'Downloading nd...'
+    d=/var/cache/pacgit-repos/nd # to be managed by pacgit
     # shellcheck disable=SC2086
-    cd /tmp                                             &&
-        git clone https://github.com/Naheel-Azawy/nd    &&
-        cd nd                                           &&
-        make install                                    &&
-        /opt/nd/nd --override init-system $pacs &&
+    git clone https://github.com/Naheel-Azawy/nd "$d"     &&
+        cd "$d"                                           &&
+        make install                                      &&
+        /opt/nd/nd --override init-system $pacs           &&
         sudo -u "$user" /opt/nd/nd --override init-user $pacs
 fi

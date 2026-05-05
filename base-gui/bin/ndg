@@ -33,18 +33,26 @@ export FILE_MANAGER='fmz'
 export BROWSER='ndg browser'
 export READER='ndg reader'
 
+LOGDIR="/tmp/ndglogs-$USER"
+
 # ==== utils ====
 
 C='\033[1m\033[34m' # blue
 E='\033[1m\033[31m' # red
 R='\033[0m'         # reset
 
+logtime() {
+    date '+%Y-%m-%d %H:%M:%S.%3N'
+}
+
 info() {
-    printf "${C}INFO:${R} %s\n" "$@"
+    printf "%s: ${C}INFO:${R} %s\n" "$(logtime)" "$@"
+    printf "%s: %s\n" "$(logtime)" "$@" >> "$LOGDIR/ndg-out"
 }
 
 err() {
-    printf "${E}ERROR:${R} %s\n" "$@" >&2
+    printf "%s: ${E}ERROR:${R} %s\n" "$(logtime)" "$@" >&2
+    printf "%s: %s\n" "$(logtime)" "$@" >> "$LOGDIR/ndg-err"
 }
 
 exists() {
@@ -898,14 +906,20 @@ foo() {
 # ==== start ====
 
 autostart() {
+    [ -z "$LOGDIR" ] && {
+        err 'No LOGDIR defined'
+        return 1
+    }
     d=$(date)
     if exists "$1" || [ -x "$1" ]; then
         n=$(basename "$1")
-        echo "$d: STDOUT OF" "$@" > "$logdir/$n"
-        echo "$d: STDERR OF" "$@" > "$logdir/$n-err"
-        "$@" >> "$logdir/$n" 2>> "$logdir/$n-err" &
+        echo "$d: STDOUT OF" "$@" > "$LOGDIR/$n-out"
+        echo "$d: STDERR OF" "$@" > "$LOGDIR/$n-err"
+        "$@" >> "$LOGDIR/$n-out" 2>> "$LOGDIR/$n-err" &
+        echo $! > "$LOGDIR/$n-pid"
+        info "started $n"
     else
-        echo "$1 not found!!!" > "$logdir/$1-err"
+        err "$1 not found!!!"
     fi
 }
 
@@ -917,8 +931,13 @@ xrdb() {
 }
 
 start() {
+    # logs dir
+    mkdir -p "$LOGDIR"
+    rm -r "$LOGDIR:?"/*
+
     # set font size based on resolution
-    dim=$(xdpyinfo | grep "dimensions" | awk '{ print $2 }' | cut -d x -f1)
+    dim=$(xdpyinfo | grep "dimensions" |
+              awk '{ print $2 }' | cut -d x -f1)
     if [ "$dim" -lt 1920 ]; then
         FONT_SIZE_NUM=12
     else
@@ -969,11 +988,6 @@ org.onboard.theme-settings key-label-font'
     eval "$(/usr/bin/gnome-keyring-daemon --start --components=pkcs11,secrets,ssh)"
     export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/gcr/ssh"
 
-    # logs dir
-    logdir="/tmp/ndglogs-$USER"
-    mkdir -p "$logdir"
-    rm -r "$logdir:?"/*
-
     # autostart programs
     autostart xset s 900                    # blank after 15 minutes
     autostart xset -b                       # disable bell
@@ -998,8 +1012,68 @@ org.onboard.theme-settings key-label-font'
     autostart battery_watch                 # low battery daemon
     autostart lockscreen_daemon             # lock screen before suspend
     autostart /usr/lib/gsd-xsettings        # gnome's settings daemon
+    autostart systrayinit                   # start the system tray, hidden
     autostart "$WINDOW_MANAGER"             # start the window manager
-    wait
+
+    # kill everything once done
+    wm_pid=$(cat "$LOGDIR/$WINDOW_MANAGER-pid")
+    [ -z "$wm_pid" ] && {
+        err 'WM PID not found!'
+        return 1
+    }
+    wait "$wm_pid"
+    endall
+}
+
+endall() {
+    pids=""
+    for f in "$LOGDIR"/*-pid; do
+        [ -f "$f" ] || continue
+        pid=$(cat "$f" 2>/dev/null)
+        case "$pid" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        pids="$pids $pid"
+    done
+
+    alive_pids() {
+        out=""
+        for p in $1; do
+            if kill -0 "$p" 2>/dev/null; then
+                out="$out $p"
+            fi
+        done
+        echo "$out"
+    }
+
+    pids=$(alive_pids "$pids")
+
+    # rounds of SIGTERM
+    for _ in $(seq 2); do
+        [ -z "$pids" ] && break
+        # shellcheck disable=SC2086
+        kill -TERM $pids 2>/dev/null
+        sleep .5
+        for p in $pids; do
+            if kill -0 "$p" 2>/dev/null; then
+                info "killed $p with SIGTERM"
+            fi
+        done
+        pids=$(alive_pids "$pids")
+    done
+
+    # final SIGKILL if needed
+    if [ -n "$pids" ]; then
+        # shellcheck disable=SC2086
+        kill -KILL $pids 2>/dev/null
+        sleep .5
+        pids=$(alive_pids "$pids")
+        for p in $pids; do
+            if kill -0 "$p" 2>/dev/null; then
+                info "killed $p with SIGTERM"
+            fi
+        done
+    fi
 }
 
 # ==== main ====
@@ -1023,6 +1097,7 @@ list() {
     echo wallpaper
     echo taskmanager
     echo touchpadtog
+    echo systrayinit
     echo systraytog
     echo wm
     echo compositor

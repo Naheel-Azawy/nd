@@ -1,7 +1,9 @@
-* Naheel's Personal Dotfiles
+* Naheel's Personal Dotfiles/Desktop
 A collection of toys glued together to buildup my setup on my machines.
 
 Warning: Use at your own responsibility. This collection of software is not stable and might explode at any moment.
+
+Note that this is a reconstruction of the previous old dotfiles to be more like an installable package.
 
 [[./screenshots/20250429.png]]
 
@@ -19,16 +21,14 @@ Warning: Use at your own responsibility. This collection of software is not stab
 
 ** Install
 Arch Linux is expected to be already installed with a working internet connection.
+Parabola may work, will see later.
 #+begin_src shell
   curl -L https://naheel.xyz/dots > /tmp/nd.sh && sh /tmp/nd.sh base base-gui
 #+end_src
 
-Or
+If no Arch/Parabola installed, the following installer can make things easy
 #+begin_src shell
-  cd
-  git clone https://github.com/Naheel-Azawy/naheel-dotfiles.git .dotfiles
-  cd .dotfiles
-  ./install.sh base base-gui
+  curl -L https://naheel.xyz/dots > /tmp/a.sh && sh /tmp/a.sh
 #+end_src
 
 *Other notes:*
@@ -36,8 +36,9 @@ Or
 - Pick any package groups you're comfortable with other than ~base~ and ~base-gui~. Tables are under ~packages~ directory.
 
 ** Update
+Using [[https://github.com/Naheel-Azawy/pacgit][pacgit]]:
 #+begin_src shell
-  nd update
+  pacgit -S https://github.com/Naheel-Azawy/nd
 #+end_src
 
 ** License

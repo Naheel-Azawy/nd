@@ -79,6 +79,7 @@ check_root() {
 
 # ==== Init system (all run under root) ====
 
+# TODO: move out as a separate script, which you then access here
 yay_wrapper() {
     check_root
 
