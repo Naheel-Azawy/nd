@@ -28,7 +28,7 @@ Parabola may work, will see later.
 
 If no Arch/Parabola installed, the following installer can make things easy
 #+begin_src shell
-  curl -L https://naheel.xyz/dots > /tmp/a.sh && sh /tmp/a.sh
+  curl -L https://naheel.xyz/arch > /tmp/a.sh && sh /tmp/a.sh
 #+end_src
 
 *Other notes:*
@@ -38,7 +38,7 @@ If no Arch/Parabola installed, the following installer can make things easy
 ** Update
 Using [[https://github.com/Naheel-Azawy/pacgit][pacgit]]:
 #+begin_src shell
-  pacgit -S https://github.com/Naheel-Azawy/nd
+  pacgit -S nd
 #+end_src
 
 ** License
