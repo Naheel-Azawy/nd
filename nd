@@ -298,7 +298,8 @@ init_user() {
 
     info 'Linking'
 
-    run create_if_not_there "$HOME/.profile" "export PATH="'"$PATH:'"$HERE:$HERE/base/bin:$HERE/base-gui/bin"'"'"
+    run create_if_not_there "$XDG_CONFIG_HOME/ndg/common.sh" "export PATH="'"$PATH:'"$HERE:$HERE/base/bin:$HERE/base-gui/bin"'"'
+    run create_if_not_there "$HOME/.profile" ". $XDG_CONFIG_HOME/ndg/common.sh
 . $HERE/base/config/profile.sh"
     lnnn "$HOME/.profile" "$HOME/.bash_profile"
     lnnn "$HOME/.profile" "$HOME/.xprofile"
@@ -309,6 +310,7 @@ init_user() {
 
     if [ -n "$gui" ]; then
         run create_if_not_there "$XDG_CONFIG_HOME/bspwm/bspwmrc" "#!/bin/sh
+. $XDG_CONFIG_HOME/ndg/common.sh
 . $HERE/base-gui/config/bspwmrc"
         run chmod +x "$XDG_CONFIG_HOME/bspwm/bspwmrc"
         lnnn "$HERE/base-gui/config/dunstrc"             "$XDG_CONFIG_HOME/dunst/dunstrc"
@@ -327,8 +329,7 @@ init_user() {
         lnnn "$HERE/base-gui/config/gtk3.css"            "$XDG_CONFIG_HOME/gtk-3.0/gtk.css"
         lnnn "$HERE/base-gui/config/gtk2rc"              "$HOME/.gtkrc-2.0"
         lnnn "$HERE/base-gui/config/sxhkdrc"             "$XDG_CONFIG_HOME/sxhkd/sxhkdrc"
-        lnnn "$HERE/base-gui/config/automonrc.sh"        "$XDG_CONFIG_HOME/automonrc.sh"
-        # lnnn "$HERE/base-gui/config/Xmodmap"             "$HOME/.Xmodmap"
+        run create_if_not_there "$XDG_CONFIG_HOME/automonrc.sh" ". $HERE/base-gui/config/automonrc.sh"
 
         info 'Setting keyboard theme'
         run sh "$HERE/base-gui/config/onboard-gsettings.sh" # TODO: any cleaner way?
