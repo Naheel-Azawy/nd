@@ -76,6 +76,7 @@
 | pacman | openvpn                                  | the open vpn                                                     |
 | pacman | networkmanager-openvpn                   | openvpn for nm                                                   |
 | git    | https://github.com/Naheel-Azawy/bspdd    | bspwm dynamic desktops                                           |
+| git    | https://github.com/Naheel-Azawy/xgds     | desktop switcher                                                 |
 | pacman | fprintd                                  | fingerprint reader                                               |
 | pacman | bluez                                    | bluetooth service                                                |
 | pacman | blueman                                  | bluetooth gui frontend                                           |

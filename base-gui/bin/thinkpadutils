@@ -212,7 +212,8 @@ xinput_tog_dev() {
 
 touchpad_tog() {
     xinput_tog_dev 'SynPS/2 Synaptics TouchPad' ||
-        xinput_tog_dev 'SYNA8017:00 06CB:CEB2 Touchpad'
+        xinput_tog_dev 'SYNA8017:00 06CB:CEB2 Touchpad' ||
+        xinput_tog_dev 'Synaptics TM3276-022'
 }
 
 input() {

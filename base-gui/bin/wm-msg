@@ -72,16 +72,6 @@ bspwm_workspace_monitor_next() {
 
 # ==== utils ====
 
-ws_scshot() {
-    # TODO: build a gui?
-    if false; then
-        wsdir="$HOME/.cache/wm-ws"
-        mkdir -p "$wsdir"
-        ws=$(bspc query -D -d .focused --names)
-        maim --hidecursor "$wsdir/$ws.png"
-    fi
-}
-
 program_menu() {
     xdotool keyup Super_L
     title=$(xdotool getactivewindow getwindowname)
@@ -124,45 +114,20 @@ program_menu() {
     esac
 }
 
+ws_scshot() {
+    timeout 1 xgds screenshot
+}
+
 ws_menu() {
-    move= ; [ "$1" = move ] && move=1
-
-    # TODO: i3 support?
-
-    items=$({
-               bspc query -D --names | while read -r d; do
-                   printf '%d: ' "$d"
-                   bspc query -N -d "$d"                          |
-                       xargs -l xdotool getwindowname 2>/dev/null |
-                       sed -z 's/\n/, /g'                         |
-                       head -c -2
-                   echo
-               done
-               printf "n: NEW\n"
-           })
-
-    n=$(bspc query -D -d .focused --names)
-    n=$((n - 1))
-    ws=$(echo "$items"        |
-             #column -s '\t' -t |
-             gmenu -l -p "Workspaces" -n "$n" --dims 700x500 |
-             cut -d : -f 1)
-
-    [ -n "$ws" ] && {
-        if [ -n "$move" ]; then
-            if [ "$ws" = n ]; then
-                bspdd new-move
-            else
-                bspdd node-move-go "$ws"
-            fi
-        else
-            if [ "$ws" = n ]; then
-                bspdd new
-            else
-                bspdd "$ws"
-            fi
-        fi
-    }
+    export XGDS_CHANGE_CMD="bspdd"
+    export XGDS_MOVE_CMD="bspdd node-move-go"
+    export XGDS_CHANGE_NEW_CMD="bspdd new"
+    export XGDS_MOVE_NEW_CMD="bspdd new-move"
+    if [ "$1" = move ]; then
+        xgds move
+    else
+        xgds switch
+    fi
 }
 
 # ==== main ====
@@ -234,13 +199,13 @@ main() {
                 window_move)            i3-msg move "$arg" ;;
                 window_resize)          i3_resize "$arg" 10 ;;
                 window_resize_tiny)     i3_resize "$arg" 1 ;;
-                workspace)              ws_scshot; i3-msg workspace "$arg" ;;
+                workspace)              ws_scshot "$arg"; i3-msg workspace "$arg" ;;
                 workspace_move)         i3-msg move container to workspace "$arg" ;;
-                workspace_move_go)      ws_scshot; i3-msg move container to workspace "$arg"\; workspace "$arg" ;;
-                workspace_next)         ws_scshot; i3-msg workspace next ;;
-                workspace_prev)         ws_scshot; i3-msg workspace prev ;;
-                workspace_new)          ws_scshot; i3_ws_new ;;
-                workspace_new_move)     ws_scshot; i3_ws_new move ;;
+                workspace_move_go)      ws_scshot "$arg"; i3-msg move container to workspace "$arg"\; workspace "$arg" ;;
+                workspace_next)         ws_scshot "$arg"; i3-msg workspace next ;;
+                workspace_prev)         ws_scshot "$arg"; i3-msg workspace prev ;;
+                workspace_new)          ws_scshot "$arg"; i3_ws_new ;;
+                workspace_new_move)     ws_scshot "$arg"; i3_ws_new move ;;
                 workspace_monitor_next) i3-msg move workspace to output right ;;
                 restart)                i3-msg restart ;;
                 end)                    i3-msg exit ;;
@@ -262,13 +227,13 @@ main() {
                 window_move)            bspwm_move "$arg" ;;
                 window_resize)          bspwm_resize "$arg" 30 ;;
                 window_resize_tiny)     bspwm_resize "$arg" 5 ;;
-                workspace)              ws_scshot; bspdd "$arg" ;;
+                workspace)              ws_scshot "$arg"; bspdd "$arg" ;;
                 workspace_move)         bspdd node-move "$arg" ;;
-                workspace_move_go)      ws_scshot; bspdd node-move-go "$arg" ;;
-                workspace_next)         ws_scshot; bspdd next ;;
-                workspace_prev)         ws_scshot; bspdd prev ;;
-                workspace_new)          ws_scshot; bspdd new ;;
-                workspace_new_move)     ws_scshot; bspdd new-move ;;
+                workspace_move_go)      ws_scshot "$arg"; bspdd node-move-go "$arg" ;;
+                workspace_next)         ws_scshot "$arg"; bspdd next ;;
+                workspace_prev)         ws_scshot "$arg"; bspdd prev ;;
+                workspace_new)          ws_scshot "$arg"; bspdd new ;;
+                workspace_new_move)     ws_scshot "$arg"; bspdd new-move ;;
                 workspace_monitor_next) bspwm_workspace_monitor_next ;;
                 restart)                bspc wm -r ;;
                 end)                    bspc quit ;;

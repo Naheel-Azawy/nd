@@ -939,6 +939,7 @@ start() {
     dim=$(xdpyinfo | grep "dimensions" |
               awk '{ print $2 }' | cut -d x -f1)
     if [ "$dim" -lt 1920 ]; then
+        # TODO: dynamic font size (and font?) changing
         FONT_SIZE_NUM=12
     else
         FONT_SIZE_NUM=15

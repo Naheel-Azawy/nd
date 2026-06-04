@@ -1,0 +1,42 @@
+#!/bin/bash
+
+DIR="$HOME/.local/share/jspaint"
+ICON="$DIR/jspaint/images/icons/512x512.png"
+DESK="$HOME/.local/share/applications/jspaint.desktop"
+PORT=23789
+
+isrunning() {
+    netstat -tulnp 2>/dev/null | grep -q :$PORT
+}
+
+mk() {
+    [ -d "$DIR/jspaint" ] || (
+        mkdir -p "$DIR" &&
+            cd "$DIR" &&
+            git clone https://github.com/1j01/jspaint
+    )
+
+    [ -f "$DESK" ] || {
+        me=$(realpath "$0")
+        mkdir -p "$(dirname "$DESK")" && {
+            echo '[Desktop Entry]'
+            echo "Type=Application"
+            echo "Name=JS Paint"
+            echo "Icon=$ICON"
+            echo "Exec=$me"
+            echo "Categories=Development;"
+        } > "$DESK"
+    }
+}
+
+main() {
+    mk
+    if ! isrunning; then
+        (cd "$DIR/jspaint" &&
+             python3 -m http.server $PORT) & disown
+        sleep 1
+    fi
+    $BROWSER --app=http://127.0.0.1:$PORT
+}
+
+main

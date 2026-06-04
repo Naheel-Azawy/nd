@@ -1,5 +1,7 @@
 #!/bin/sh
 
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/automonrc.sh"
+
 saved=''
 
 run() {
@@ -153,69 +155,154 @@ now() {
     date +%s%3N
 }
 
-lowpass_bak() {
-    # print the last line in the range of `target` seconds
-    target="$1"
-
-    lastf=$(mktemp)
-    trap 'rm $lastf' INT TERM
-
-    while read -r line; do
-        lastt=$(now)
-        echo "$lastt" >"$lastf"
-
-        {
-            receivedt=$(now)
-            sleep "$target"
-            lastt=$(cat "$lastf")
-            if [ "$receivedt" -ge "$lastt" ]; then
-                echo "$line"
-            fi
-        } &
-    done
-
-    wait
-}
-
 lowpass() {
     # prints the last line in the range of `debounce_time` seconds,
     # defaults to 1 second
     debounce_time="${1:-1}"
     tmpfile=$(mktemp)
-    trap 'rm -f "$tmpfile"' EXIT INT TERM
+    genfile=$(mktemp)
+    echo 0 > "$genfile"
+    trap 'rm -f "$tmpfile" "$genfile"' EXIT INT TERM
+
     while IFS= read -r line; do
+        gen=$(( $(cat "$genfile") + 1 ))
+        echo "$gen"  > "$genfile"
         echo "$line" > "$tmpfile"
-        [ -n "$timer_pid" ] && kill "$timer_pid" 2>/dev/null
-        (sleep "$debounce_time"
-         cat "$tmpfile") &
-        timer_pid=$!
+        ( my_gen="$gen"
+          sleep "$debounce_time"
+          [ "$(cat "$genfile")" = "$my_gen" ] && cat "$tmpfile"
+        ) &
     done
-    [ -n "$timer_pid" ] && wait "$timer_pid"
+    wait
+}
+
+daemon() {
+    udevadm monitor | while read -r line; do
+        if echo "$line" | grep -Eq 'UDEV.+\(drm\)'; then
+            echo "$(date) $line"
+        fi
+    done          |
+        lowpass 2 |
+        while read -r line; do
+            echo "$line"
+            handle
+        done
+}
+
+current_xrandr() {
+    xrandr | awk '
+      / connected/ {
+          output=$1
+
+          if ($0 ~ / connected primary /)
+              primary="--primary"
+          else
+              primary=""
+
+          rotate="normal"
+
+          for (i=1; i<=NF; i++) {
+              if ($i ~ /\(normal|left|right|inverted/) {
+                  gsub(/[()]/, "", $i)
+                  rotate=$i
+              }
+
+              if ($i ~ /^[0-9]+x[0-9]+\+[0-9]+\+[0-9]+$/) {
+                  split($i,a,"+")
+                  split(a[1],r,"x")
+
+                  printf "--output %s %s --mode %sx%s --pos %sx%s ",
+                         output,
+                         primary,
+                         r[1], r[2],
+                         a[2], a[3]
+
+                  if (rotate != "normal")
+                      printf "--rotate %s ", rotate
+
+                  found=1
+              }
+          }
+
+          if (!found)
+              printf "--output %s --off ", output
+
+          found=0
+      }
+
+      END { print "" }'
+}
+
+current_save() {
+    if [ $# = 1 ]; then
+        n=$1
+    else
+        n=mon-$(date '+%Y%m%d%H%M%S')
+    fi
+    s=$(current_sum)
+    opts=$(current_xrandr)
+    if [ -f "$CFG" ]; then
+        grep -Eq "^save ${s}( |$)" "$CFG" && {
+            echo 'ERROR: config sum already exists'
+            return 1
+        }
+        grep -Eq "^save [^ ]+ ${n}( |$)" "$CFG" && {
+            echo 'ERROR: config name already exists'
+            return 1
+        }
+    fi
+    printf 'save %s %s xrandr \\\n    %s\n\n' "$s" "$n" "$opts" \
+           >> "$CFG"
+}
+
+arandr_save() {
+    if [ $# = 1 ]; then
+        f=$1
+    else
+        # latest
+        f=$(ls -1t ~/.screenlayout/*.sh 2>/dev/null | head -n1)
+    fi
+
+    [ -f "$f" ] || {
+        echo "ERROR: no arandr script found"
+        return 1
+    }
+
+    n=$(basename "$f" .sh)
+    opts=$(sed -rn 's/xrandr (.+)/\1/p' "$f")
+
+    [ -n "$opts" ] || {
+        echo "ERROR: failed to extract xrandr command"
+        return 1
+    }
+
+    s=$(current_sum)
+
+    if [ -f "$CFG" ]; then
+        grep -Eq "^save ${s}( |$)" "$CFG" && {
+            echo 'ERROR: config sum already exists'
+            return 1
+        }
+
+        grep -Eq "^save [^ ]+ ${n}( |$)" "$CFG" && {
+            echo 'ERROR: config name already exists'
+            return 1
+        }
+    fi
+
+    printf 'save %s %s xrandr \\\n    %s\n\n' \
+           "$s" "$n" "$opts" >> "$CFG"
 }
 
 main() {
-    cfg="${XDG_CONFIG_HOME:-$HOME/.config}/automonrc.sh"
-    [ -e "$cfg" ] && . "$cfg"
+    [ -e "$CFG" ] && . "$CFG"
 
     case "$1" in
-        sum)
-            current_sum ;;
-
-        auto|extend|mirror)
-            handle "$@" ;;
-
-        daemon)
-            udevadm monitor | while read -r line; do
-                if echo "$line" | grep -Eq 'UDEV.+\(drm\)'; then
-                    echo "$(date) $line"
-                fi
-            done          |
-                lowpass 2 |
-                while read -r line; do
-                    echo "$line"
-                    handle
-                done ;;
-
+        sum)                       current_sum       ;;
+        save)               shift; current_save "$@" ;;
+        asave)              shift; arandr_save  "$@" ;;
+        auto|extend|mirror)        handle       "$@" ;;
+        daemon)                    daemon            ;;
         *)
             echo 'ERROR: unknown args'
             return 1

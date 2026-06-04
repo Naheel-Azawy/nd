@@ -1,0 +1,13 @@
+- [ ] bar
+  + [ ] shell rc
+  + [ ] rewrite in c/c++
+  + [ ] put in a separate repo
+  + [ ] integrate with lemonbar?
+- [-] automon
+  - [X] improve a bit
+  - [ ] lowpass increase speed?
+  - [ ] put in a separate repo
+- [ ] font
+  - [ ] make changes dynamic
+    I think only gtk and xrdb, which can change
+- [X] desktop switcher
