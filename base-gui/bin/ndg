@@ -990,6 +990,7 @@ org.onboard.theme-settings key-label-font'
     export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/gcr/ssh"
 
     # autostart programs
+    autostart "$WINDOW_MANAGER"             # start the window manager
     autostart xset s 900                    # blank after 15 minutes
     autostart xset -b                       # disable bell
     autostart sxhkd                         # keyboard daemon
@@ -1014,7 +1015,7 @@ org.onboard.theme-settings key-label-font'
     autostart lockscreen_daemon             # lock screen before suspend
     autostart /usr/lib/gsd-xsettings        # gnome's settings daemon
     autostart systrayinit                   # start the system tray, hidden
-    autostart "$WINDOW_MANAGER"             # start the window manager
+    autostart xgds daemon                   # desktop switcher daemon
 
     # kill everything once done
     wm_pid=$(cat "$LOGDIR/$WINDOW_MANAGER-pid")

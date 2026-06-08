@@ -11,3 +11,4 @@
   - [ ] make changes dynamic
     I think only gtk and xrdb, which can change
 - [X] desktop switcher
+- [ ] ndg autostart into init-like start, restart, stop, etc
