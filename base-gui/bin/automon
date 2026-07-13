@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# TODO: move to another repo
+
 CFG="${XDG_CONFIG_HOME:-$HOME/.config}/automonrc.sh"
 
 saved=''

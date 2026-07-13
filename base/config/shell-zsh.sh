@@ -10,7 +10,7 @@ bindkey -e
 zshctr=0
 
 SSH_ENV=$HOME/.ssh/env
-SHELL=$(command -v "$0")
+SHELL=$(command -v zsh)
 
 XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
@@ -54,46 +54,38 @@ pyenv_init() {
 zsh_init_interactive() {
     zstyle :compinstall filename "$HOME/.zshrc"
     autoload -Uz compinit
-    compinit
+    if [[ -n ${ZDOTDIR:-$HOME}/.zcompdump(#qN.mh+24) ]]; then
+        compinit
+    else
+        compinit -C
+    fi
     setopt interactivecomments
 
     export GPG_TTY=$(tty)
     export TERM="xterm-256color"
 
-    export PS1="%F{green}%1~%F{reset}> "
-    precmd() {
-        local s=$?
-        local ps_face
-        local color_cwd
-        local suffix
+    autoload -Uz vcs_info
+    autoload -Uz add-zsh-hook
 
-        if [ $s != 0 ]; then
-            ps_face=$'%F{red}:( %F{reset}'
-        else
-            ps_face=
-        fi
+    setopt PROMPT_SUBST # evals %(...) in prompt on every instance
 
-        case "$USER" in
-            root|toor)
-                color_cwd='%F{red}'
-                suffix='#' ;;
-            *)
-                color_cwd='%F{green}'
-                suffix='>' ;;
-        esac
+    # git info via vcs_info
+    zstyle ':vcs_info:*'     enable            git
+    zstyle ':vcs_info:*'     check-for-changes true
+    zstyle ':vcs_info:git:*' unstagedstr       '*'   # unstaged changes
+    zstyle ':vcs_info:git:*' stagedstr         '+'   # staged changes
+    zstyle ':vcs_info:git:*' formats           ' (%b%u%c)'
+    zstyle ':vcs_info:git:*' actionformats     ' (%b|%a%u%c)'
 
-        local git_branch
-        # git_branch=$(git branch --show-current 2>/dev/null)
-        [ -n "$git_branch" ] && git_branch=" ($git_branch)"
+    add-zsh-hook precmd vcs_info
 
-        PS1=''
-        PS1="%F{249}$PS1%T%F{reset} "
-        PS1="$PS1$CONDA_PROMPT_MODIFIER"
-        PS1="$PS1$ps_face"
-        PS1="$PS1$color_cwd%1~"
-        PS1="$PS1$git_branch"
-        PS1="$PS1%F{reset}$suffix "
-    }
+    # PS1 with zsh style
+    PROMPT='%F{249}%T%f '                    # timestamp
+    PROMPT+='${CONDA_PROMPT_MODIFIER}'       # conda env, if set
+    PROMPT+='%(?..%F{red}:( %f)'             # only shown if last exit status != 0
+    PROMPT+='%(!.%F{red}.%F{green})%1~%f'    # cwd, red if root
+    PROMPT+='%F{yellow}${vcs_info_msg_0_}%f' # git branch, cached by vcs_info
+    PROMPT+='%(!.#.>) '                      # root gets #, others get >
 
     zsh_greeting() {
         local user

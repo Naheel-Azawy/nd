@@ -476,6 +476,9 @@ touchpadtog() {
 
 systrayinit() {
     # start tray hidden
+
+    killall stalonetray >/dev/null 2>/dev/null
+
     stalonetray \
         --geometry 1x1-10000-10000 \
         --grow-gravity NW \
@@ -617,7 +620,7 @@ lockscreen_unlock() {
     pkill $lock_bin
 }
 
-automon_cache=~/.cache/automon/xrandr
+automon_cache=~/.cache/automon/xrandr # TODO: cleanup with automon
 
 xrandr_wrapper() {
     automon_cache=~/.cache/automon/xrandr

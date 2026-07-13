@@ -23,8 +23,10 @@ post() {
     rearrange_desktops
     run_if_exists thinkpadutils x1_touch_screen_fix
     run_if_exists ndg input init
+    run_if_exists ndg systrayinit
 }
 
+# TODO: move this to bspdd and cleanup caching with ndg
 rearrange_desktops() {
     xr=$(xrandr_wrapper)
     mons=$(echo "$xr" |
