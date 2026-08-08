@@ -655,6 +655,7 @@ class Bar(BarBase):
                     out_acs += icons["plug"]
 
         r = self.dfgc
+        # TODO: if multiple batteries in one machine, do not show warning until both are low
         for dev in devs["batteries"]:
             percent  = dev["percentage"]
             charging = dev["charging"]

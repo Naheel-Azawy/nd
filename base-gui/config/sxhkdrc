@@ -94,9 +94,13 @@ super+ctrl+p
 super+minus
 	wm-msg ws-menu
 
+# Jump to a window
+super+ctrl+minus
+	wm-msg win-menu
+
 # Move window to a workspace
 super+shift+minus
-	wm-msg ws-menu move
+	wm-msg ws-menu-move
 
 # Restart window manager
 super+shift+r

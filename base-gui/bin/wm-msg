@@ -123,11 +123,7 @@ ws_menu() {
     export XGDS_MOVE_CMD="bspdd node-move-go"
     export XGDS_CHANGE_NEW_CMD="bspdd new"
     export XGDS_MOVE_NEW_CMD="bspdd new-move"
-    if [ "$1" = move ]; then
-        xgds move
-    else
-        xgds switch
-    fi
+    xgds "$@"
 }
 
 # ==== main ====
@@ -143,7 +139,17 @@ main() {
 
         ws-menu)
             shift
-            ws_menu "$@"
+            ws_menu switch "$@"
+            return ;;
+
+        ws-menu-move)
+            shift
+            ws_menu move "$@"
+            return ;;
+
+        win-menu)
+            shift
+            ws_menu switch-windows "$@"
             return ;;
     esac
 
