@@ -814,7 +814,7 @@ class Bar(BarBase):
         if self.a:
             return f"p{out}"
         else:
-            cmd = cfg + "gtrm -p 'watch -ctn 15 prayer' --dims 25x8"
+            cmd = cfg + "prayer --gmenu"
             return f"%{{A:{cmd}&:}} " + icons["prayer"] + \
                 f" {out}%{{A}}"
 
