@@ -1,14 +1,131 @@
 #!/bin/sh
+#
+# bubblewrap-based rewrite of the firejail "droid" jail.
+#
+# WHY THE SWITCH: firejail's --whitelist has special-cased handling for
+# paths under $HOME, and that handling doesn't reliably compose with
+# --private=DIR (a custom home substitute) -- whitelisting an external
+# directory under the real $HOME could silently fail to mount. bubblewrap
+# has no such special-casing: the sandbox's filesystem view is just an
+# ordered list of bind mounts, and later binds simply override earlier
+# ones at overlapping paths. So we can bind $jail onto $HOME (like
+# --private=$jail did), and *afterwards* bind an external directory onto
+# its own real path -- even though that path is nested under $HOME -- and
+# it will correctly show through.
+#
+# NEEDS VERIFICATION ON YOUR MACHINE: unlike firejail's --noprofile (which
+# is permissive by default and only restricts what you explicitly ask it
+# to), bubblewrap starts from *nothing* -- every device node, socket, and
+# directory the app needs has to be explicitly bound in. The binds below
+# are a best-effort guess at what Android Studio / the emulator / ADB need
+# (GPU, KVM, USB, X11 or Wayland, audio). Some may be missing or
+# unnecessary for your setup -- see the comments inline.
+
+# NOTE ON A HARMLESS SIDE EFFECT: when -d/--dir points at a path that
+# doesn't yet exist anywhere inside the jail's own real storage, bwrap
+# creates the missing intermediate directories there as real, permanent,
+# EMPTY scaffolding (needed to have something to bind onto). No actual
+# file content from -d's target ever lands there -- it's just empty
+# directories that persist across runs. If you ever find odd-looking
+# empty folders under $jail matching paths you've passed via -d, that's
+# why; they're harmless and safe to remove.
 
 jail="$HOME/.local/share/jail-android-studio"
+wl_dir=""
+
+check_install() {
+    if ! command -v bwrap >/dev/null 2>&1; then
+        echo "ERROR: bubblewrap (bwrap) is not installed (or not in PATH)." >&2
+        exit 1
+    fi
+    if [ ! -x "$jail/android-studio/bin/studio.sh" ]; then
+        echo "ERROR: Android Studio doesn't look properly installed." >&2
+        echo "       Missing or non-executable: $jail/android-studio/bin/studio.sh" >&2
+        echo "       Run: $(basename "$0") /path/to/android-studio-*.tar.gz" >&2
+        exit 1
+    fi
+}
 
 do_jail() {
-    exec firejail          \
-         --noprofile       \
-         --private-tmp     \
-         --disable-mnt     \
-         --private="$jail" \
-         "$@"
+    check_install
+
+    # Save the original command (what to actually run inside the sandbox,
+    # e.g. "zsh" or "studio.sh /path/to/project") before we start
+    # overwriting "$@" with bwrap's own flags. POSIX sh has no arrays, so
+    # this is stashed newline-separated (safe unless an arg itself
+    # contains a literal newline) and restored at the end.
+    cmdargs=""
+    for a in "$@"; do
+        cmdargs="$cmdargs$a
+"
+    done
+
+    set -- --unshare-all --share-net --die-with-parent
+
+    # Start from the whole real filesystem, then carve out isolated
+    # pieces on top. This mirrors firejail's --noprofile (loose by
+    # default, only $HOME is actually substituted) rather than building a
+    # hardened sandbox from scratch.
+    set -- "$@" --bind / /
+    set -- "$@" --dev /dev
+    set -- "$@" --proc /proc
+    set -- "$@" --tmpfs /tmp
+
+    # Roughly equivalent to firejail's --disable-mnt: hide auto-mounted
+    # removable media rather than exposing it via the "/" bind above.
+    # Remove any of these if you *want* Android Studio to see them.
+    [ -d /media ]     && set -- "$@" --tmpfs /media
+    [ -d /mnt ]       && set -- "$@" --tmpfs /mnt
+    [ -d /run/media ] && set -- "$@" --tmpfs /run/media
+
+    # X11: the fresh --tmpfs /tmp above hides the real socket dir, so
+    # it needs to be re-exposed explicitly. Also re-expose the Xauthority
+    # cookie file, since it normally lives under the real $HOME, which
+    # we're about to override below.
+    [ -d /tmp/.X11-unix ] && set -- "$@" --ro-bind /tmp/.X11-unix /tmp/.X11-unix
+    xauth_file="${XAUTHORITY:-$HOME/.Xauthority}"
+    [ -f "$xauth_file" ] && set -- "$@" --ro-bind "$xauth_file" "$xauth_file"
+
+    # Wayland / PulseAudio / D-Bus session bus all live under here on
+    # most modern (systemd) systems -- not under $HOME, so unaffected by
+    # the home substitution below, but still needs to be bound in.
+    [ -d "$XDG_RUNTIME_DIR" ] && set -- "$@" --bind "$XDG_RUNTIME_DIR" "$XDG_RUNTIME_DIR"
+
+    # Android emulator hardware acceleration (KVM), GPU rendering, ADB
+    # over USB, and emulator audio. Comment out whichever you don't need
+    # or don't have.
+    [ -e /dev/kvm ]     && set -- "$@" --dev-bind /dev/kvm /dev/kvm
+    [ -d /dev/dri ]     && set -- "$@" --dev-bind /dev/dri /dev/dri
+    [ -d /dev/bus/usb ] && set -- "$@" --dev-bind /dev/bus/usb /dev/bus/usb
+    [ -d /dev/snd ]     && set -- "$@" --dev-bind /dev/snd /dev/snd
+
+    # The actual point of this whole script: substitute $HOME with the
+    # persistent jail storage (same effect as firejail's --private=$jail),
+    # then -- if a directory was requested -- bind it in on top, at its
+    # own real absolute path. Because this bind comes *after* the $HOME
+    # substitution, it wins for that specific subtree even though it's
+    # nested inside $HOME. No firejail-style conflict.
+    set -- "$@" --setenv HOME "$HOME"
+    set -- "$@" --bind "$jail" "$HOME"
+    if [ -n "$wl_dir" ]; then
+        set -- "$@" --bind "$wl_dir" "$wl_dir"
+        set -- "$@" --chdir "$wl_dir"
+    else
+        set -- "$@" --chdir "$HOME"
+    fi
+
+    set -- "$@" --
+
+    # Restore the original command, splitting only on newlines so spaces
+    # within a single argument are preserved.
+    IFS='
+'
+    set -- "$@" $cmdargs
+    unset IFS
+
+    export CONDA_PROMPT_MODIFIER='(droid-jail) '
+
+    exec bwrap "$@"
 }
 
 enter_shell() {
@@ -16,6 +133,8 @@ enter_shell() {
     export JAVA_HOME='/usr/lib/jvm/default'
     export PATH="$PATH:$HOME/flutter/bin"
     echo "Entering Android jail at $jail..."
+    [ -n "$wl_dir" ] && echo "Granting access to: $wl_dir"
+
     if command -v zsh >/dev/null && [ -f ~/.zshrc ]; then
         cp "$(realpath ~/.zshrc)" "$jail/.zshrc"
         do_jail zsh
@@ -25,8 +144,65 @@ enter_shell() {
 }
 
 main() {
+    # Pull a leading -d/--dir DIR (or --dir=DIR) out of "$@", resolve it to
+    # an absolute path, and leave the remaining args in place. Same
+    # newline-rebuild trick as above, needed here because POSIX sh has no
+    # arrays.
+    newargs=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -d|--dir)
+                [ $# -ge 2 ] || { echo "ERROR: $1 requires a directory argument" >&2; exit 1; }
+                wl_dir=$(realpath "$2") || exit 1
+                shift 2
+                ;;
+            --dir=*)
+                wl_dir=$(realpath "${1#--dir=}") || exit 1
+                shift
+                ;;
+            *)
+                newargs="$newargs$1
+"
+                shift
+                ;;
+        esac
+    done
+    IFS='
+'
+    set -- $newargs
+    unset IFS
+
+    case "$1" in
+        --help|-h)
+            cat <<EOF
+$(basename "$(realpath "$0")"): [-d DIR|--dir DIR] [shell|path|rm] [ARGS]...
+
+  -d DIR, --dir DIR   Bind-mount DIR (must exist on the real filesystem) so
+                      it is visible inside the otherwise fully-isolated
+                      jail, at its own real path. With 'shell', also cd's
+                      into it. Without a subcommand, it's opened as the
+                      Android Studio project.
+
+Subcommands:
+  shell   Open a jailed interactive shell (with -d, cd's into DIR)
+  path    Print the jail directory and exit
+  rm      Delete the jail (uninstall) and exit
+
+Examples:
+  $(basename "$0") -d ~/dev/myapp shell     # shell, cwd = ~/dev/myapp
+  $(basename "$0") -d ~/dev/myapp           # open myapp in Android Studio
+  $(basename "$0") ~/dev/myapp              # same, dir auto-detected
+  $(basename "$0") shell                    # plain jailed shell, no extra access
+EOF
+            exit 0
+            ;;
+    esac
+
     targz="$1"
-    [ -n "$targz" ] && targz=$(realpath "$targz")
+    case "$targz" in
+        shell|path|rm) targz="" ;;
+    esac
+    [ -n "$targz" ] && [ -e "$targz" ] && targz=$(realpath "$targz" 2>/dev/null)
 
     [ "$1" = 'rm' ]               && { rm -r "$jail"; exit; }
     [ -d "$jail" ]                || mkdir -p "$jail"
@@ -64,11 +240,21 @@ main() {
         path)
             echo "$jail" ;;
 
-        --help|-h)
-            echo "$(basename "$(realpath "$0")"): [shell|path] [ARGS]..." ;;
-
         *)
+            # If a project path was given -- either via -d/--dir, as a
+            # plain argument (e.g. from the .desktop file's %f), or a
+            # manual invocation like "droid ~/dev/myapp" -- make sure it's
+            # bound in so Android Studio can actually read/write it from
+            # inside the jail.
+            if [ -z "$wl_dir" ] && [ -n "$1" ] && [ -e "$1" ]; then
+                wl_dir=$(realpath "$1")
+                shift
+                set -- "$wl_dir" "$@"
+            elif [ -n "$wl_dir" ] && [ $# -eq 0 ]; then
+                set -- "$wl_dir"
+            fi
             do_jail "$HOME/android-studio/bin/studio.sh" "$@"
+            ;;
     esac
 }
 

@@ -200,7 +200,7 @@ alt+ctrl+Print
 
 # Show shortcuts help screen
 super+F1
-	gtrm -p 'kb-shortcuts-help | less'
+	kb-shortcuts-help | gmenu -l -d 'min(900, 90%)*max(70%, 600)'
 
 # Show the system monitor
 super+grave
