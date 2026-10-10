@@ -10,7 +10,8 @@ Note that this is a reconstruction of the previous old dotfiles to be more like 
 ** Main components
 - emacs
 - zsh
-- xterm
+- [[https://github.com/Naheel-Azawy/gtrm][gtrm]]
+- [[https://github.com/Naheel-Azawy/gmenu][gmenu]]
 - [[https://github.com/Naheel-Azawy/fmz][fmz]]
 - tmux everywhere ([[https://github.com/Naheel-Azawy/theterm][theterm]])
 - bspwm

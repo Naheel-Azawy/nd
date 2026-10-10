@@ -28,7 +28,7 @@ export SXHKD_SHELL=dash
 export MOZ_USE_XINPUT2=1
 
 export TERMINAL='theterm'
-export THETERM_TERM='xterm'
+export THETERM_TERM='gtrm'
 export FILE_MANAGER='fmz'
 export BROWSER='ndg browser'
 export READER='ndg reader'
