@@ -670,6 +670,10 @@ lockscreen() {
     #     img=$album_img
 
     wait_fingerprint &
+    rc522="$HOME/.local/share/nd/lockscreen_rc533.sh"
+    if [ -f "$rc522" ]; then
+        sh "$rc522" &
+    fi
 
     y=$(mon_prim_y_offset)
 

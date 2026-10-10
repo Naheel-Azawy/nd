@@ -326,6 +326,11 @@ Produce only the %s translation, without any additional explanations or commenta
         fi
     }
 
+    qrcode() {
+        [ $# != 1 ] && return 1
+        qrencode "$1" -o - -t UTF8
+    }
+
     zle -N paste_file_or_clipboard
     bindkey '^V' paste_file_or_clipboard
 

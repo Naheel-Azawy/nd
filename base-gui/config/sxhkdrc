@@ -156,7 +156,7 @@ super+shift+p
 
 # Clipboard manager
 super+shift+c
-	clipmenu
+	clipmenu --noparse
 
 # Unicode characters (copy to clipboard)
 super+u
